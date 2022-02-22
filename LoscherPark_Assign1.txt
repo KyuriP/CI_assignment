@@ -1,0 +1,15 @@
+#Causal Inference - Assignment I
+#Emilia Löscher & Kyuri Park
+
+#Overview variables
+# inspired by "Co-morbid obsessive-compulsive disorder and depression: A Bayesian
+network approach" (McNatty, R.J., Mair, P., Reeder, B. L. & B. C. Riemann)
+
+# Obessive-compulsive disorder (OCD) and depression syptoms 
+OCDint - inference due to obsessions connected to OCD (MAIN CAUSE OF INTEREST)
+OCDdist - distress caused by obsessions connected to OCD 
+OCDcont - difficulty controlling obsessions
+sad - sadness as a symptom
+insom - sleeping problems, especially early morning awakening
+concen - concentration/decision-making impairment 
+guilt - guilt and self-blame (MAIN OUTCOME OF INTEREST)
