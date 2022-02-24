@@ -76,13 +76,13 @@ ggdag_status(ocddep) + theme_dag()
 In the following, the structural causal model for our DAG is specified:
 
 
-$$ocint  := \epsilon_{ocint}$$
-$$ocdis := 3 \cdot ocint + \epsilon_{ocdis}$$
-$$occon := 4 \cdot ocdis + \epsilon_{occon}$$
-$$sad := 2 \cdot ocdis + 1 \cdot occon + \epsilon_{sad}$$
-$$insom := 2 \cdot sad + \epsilon_{insom}$$ 
-$$concen :=  1 \cdot ocint + 4 \cdot insom + \epsilon_{concen}$$
-$$guilt := 1 \cdot concen + 1 \cdot sad + \epsilon_{guilt}$$
+$$ocint  := 2.69 + \epsilon_{ocint}$$
+$$ocdis := 2.81 + 3.52 \cdot ocint + \epsilon_{ocdis}$$
+$$occon := 2.67 + 3.38 \cdot ocdis + \epsilon_{occon}$$
+$$sad := 1.55 + 4.33 \cdot ocdis + 2 \cdot occon + \epsilon_{sad}$$
+$$insom := 0.81 + 2 \cdot sad + \epsilon_{insom}$$ 
+$$concen :=  1.48 + 2 \cdot ocint + 3 \cdot insom + \epsilon_{concen}$$
+$$guilt := 1.56 + 1.5 \cdot concen + 3.3 \cdot sad + \epsilon_{guilt}$$
 ,where $\epsilon_{ocint}, \ldots, \epsilon_{guilt} \stackrel{iid}{\sim} N(0 , SD_{i})$ with $i \in {ocint, \ldots, guilt}$.  
 
 We base our estimates of the intercepts and residual standard deviations (SD) on the data from McNally et al. (2017), where they interviewed 408 patients for the OCD and depression symptoms. Intercepts and residual SDs are set to the mean and SD values of the corresponding item (symptom) that they found. The regression coefficients are decided such that it could represent the relative strength (effect) of each item we have thought of, considering the size of SD for each item.
@@ -99,12 +99,12 @@ n <- 500
 
 # generate the data
 ocint <- 2.69 + rnorm(n, 0, 0.82)
-ocdis <- 2.81 + 3.5 * ocint + rnorm(n, 0, 0.76)
-occon <- 2.67 + 3 * ocdis + rnorm(n, 0, 0.76)
-sad <- 1.55 + 4.3 * ocdis + 2 * occon + rnorm(n, 0, 0.94)
-insom <- 0.81 + 2 * sad + rnorm(n, 0, 1.07)
-concen <-  1.48 + 2 * ocint + 3 * insom + rnorm(n, 0, 0.87)
-guilt <- 1.56 + 1.5 * concen + 3.3 * sad + rnorm(n, 0, 1.17)
+ocdis <- 2.81 + 3.52 * ocint + rnorm(n, 0, 0.76)
+occon <- 2.67 + 3.38 * ocdis + rnorm(n, 0, 0.76)
+sad <- 1.55 + 4.33 * ocdis + 2.98 * occon + rnorm(n, 0, 0.94)
+insom <- 0.81 + 2.17 * sad + rnorm(n, 0, 1.07)
+concen <-  1.48 + 2.54 * ocint + 3.46 * insom + rnorm(n, 0, 0.87)
+guilt <- 1.56 + 1.57 * concen + 3.31 * sad + rnorm(n, 0, 1.17)
 
 # putting them in a dataframe called "OCDDEP"
 OCDDEP <- data.frame(ocint, ocdis, occon, sad, insom, concen, guilt)
@@ -176,24 +176,39 @@ b. Outcome variable: *guilt*
 
 
 ## 6. For the causal effect specified in 5
-a. What is the true causal effect of the cause on the outcome variable based on your SCM?
-path1  
-path2
+### a. What is the true causal effect of the cause on the outcome variable based on your SCM?  
+ - path1) ocdis --> sad --> guilt
+ - path2) ocdis --> occon --> sad --> guilt
+ - pa.6th3) ocdis --> sad --> insom --> concen --> guilt
+ 
 ```{r}
- 1 * 2 + 1 * 4 * 2 * 2 + 1 * 1 * 4
+# path 1 
+path1 <- 4.33 * 3.31
+# path 2
+path2 <- 3.38 * 2.98 * 3.31
+# path 3
+path3 <- 4.32 * 2.17 * 3.46 * 1.57
+
+# total causal effect
+path1 + path2 + path3
 ```
 
-22?
 
-b. Based on the true DAG, what linear regression model should be used to estimate the causal effect correctly?
+### b. Based on the true DAG, what linear regression model should be used to estimate the causal effect correctly?  
+We block the backdoor path via controlling for *ocint*.
 
+$$guilt = intercept + ocdis + ocint + \epsilon $$
+
+
+### c. Estimate the causal effect with this regression model based on your generated data. To what extent is the true effect recovered?
+
+for now it is very different... something to do with the intercept?
 ```{r}
-# mod_OCD <- lm(guilt ~ OCDdist + OCDint, data = OCDdata)
-# summary(mod_OCD)
+mod <- lm(guilt ~ ocdis + ocint, data = OCDDEP)
+summary(mod)
 ```
-?
 
-c. Estimate the causal effect with this regression model based on your generated data. To what extent is the true effect recovered?
+
 ```{r}
 # cpdag_mat_OCD <- as(pc_OCD,"matrix")
 # 
@@ -218,26 +233,26 @@ The third CP-DAG does a good job?!
 
 
 
-## 7. We will need a dichotomous cause variable
-a. Make a dichotomized version of the cause variable from question 5&6 in your dataset, for example by assigning scores lower than the mean a 0 and the rest a 1.
+## 7. For assignment Part II, we will need a dichotomous cause variable.
+### a. Make a dichotomized version of the cause variable from question 5&6 in your dataset, for example by assigning scores lower than the mean a 0 and the rest a 1.
 
 ```{r}
 #Dichtomizing the effect variable OCDdist
-# mean_OCDdist <- mean(OCDdistress)
-# OCDdist_d <- rep(1, length(OCDdistress))
-# OCDdist_d[which(OCDdistress < mean_OCDdist)] <- 0
-#
-# OCDdata <- cbind(OCDdata, OCDdist_d)
+mean_ocdis <- mean(ocdis)
+ocdis_d <- rep(1, length(ocdis))
+ocdis_d[which(ocdis < mean_ocdis)] <- 0
+
+OCDDEP <- cbind(OCDDEP, ocdis_d)
 
 ```
 
 b. Use the correct model for the causal effect (the one from 6b) to estimate the causal effect again, but now with your dichotomized cause variable. Discuss the results.
 ```{r}
-# mod_OCD_d <- lm(guilt ~ OCDdist_d + OCDint, data = OCDdata)
-# summary(mod_OCD_d)
+mod_OCD_d <- lm(guilt ~ ocdis_d + ocint, data = OCDDEP)
+summary(mod_OCD_d)
 ```
 
-?
+
 
 
 ## 8. Prepare the data for the second causal inference assignment
