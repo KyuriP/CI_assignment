@@ -42,7 +42,7 @@ Given this background, here we proceed to look into the causal relationship betw
 
 ```{r plotdag, out.width="90%", fig.cap="OCD-Depression DAG", fig.align='center'}
 
-#varnames <- c("ocdis", "ocint", "occon", "sad", "insom", "concen", "guilt")
+# varnames <- c("ocint", "ocdis", "occon", "sad", "insom", "concen", "guilt")
 # Adj <- matrix(c(0,1,0,0,0,1,0,
 #                 0,0,1,1,0,0,0,
 #                 0,0,0,1,0,0,0,
@@ -51,7 +51,7 @@ Given this background, here we proceed to look into the causal relationship betw
 #                 0,0,0,0,0,0,1,
 #                 0,0,0,0,0,0,0), 7,7, byrow = TRUE, dimnames = list(varnames, varnames))
 # 
-# qgraph(Adj, labels = varnames)
+# qgraph(Adj, labels = varnames, layout= "groups", theme="classic")
 
 ocddep <- dagify(
   ocdis ~ ocint,
@@ -60,124 +60,114 @@ ocddep <- dagify(
   insom ~ sad,
   concen ~ ocint + insom,
   guilt ~ concen + sad,
-  exposure = "ocdis", # cause we are interested in
-  outcome = "guilt", # effect varaiable we are interested in
-  # set the coordites
-  coords = list(x = c(ocdis = -1, ocint=-1, occon=-1, sad = 0, insom=0, concen=1, guilt = 1),
-              y = c(ocdis = 0, ocint=1, occon=-1, sad = 0, insom=1, concen=1, guilt = 0)) 
+  exposure = "ocdis", # cause variable we are interested in
+  outcome = "guilt", # effect variable we are interested in
+  # set the coordinates
+  coords = list(x = c(ocdis = -1, ocint=-0.5, occon=-0.5, sad = 0, insom=0, concen=0.5, guilt = 1),
+              y = c(ocdis = 0, ocint=1, occon=-1, sad = 0, insom=0.5, concen=1, guilt = 0)) 
 )
 
 ggdag_status(ocddep) + theme_dag()
 
 ```
 
-## 2. Specify a structural causal model for your DAG.
-In the following, the structural causal model for our DAG is specified.  
+## 2. Specify a structural causal model for your DAG. Assume all relationships between the variables are linear, and all the variables have nrmally distributed residuals.  
 
-$$ocint  := \varepsilon_{ocint}$$
-$$ocdis := 3 \cdot ocint + \varepsilon_{ocdis}$$
-$$occon := 4 \cdot ocdis + \varepsilon_{occon}$$
-$$sad := 2 \cdot ocdis + 1 \cdot occon + \varepsilon_{sad}$$
-$$insom := 2 \cdot sad + \varepsilon_{insom}$$
-$$concen :=  1 \cdot ocint + 4 \cdot insom + \varepsilon_{concen}$$
-$$guilt := 1 \cdot concen + 1 \cdot sad + \varepsilon_{guilt}$$
+In the following, the structural causal model for our DAG is specified:
 
-where $\varepsilon_{ocint}, \ldots, \varepsilon_{guilt} \sim N(0 , SD_{i})$ with $i \in {ocint, \ldots, guilt}$.
 
-The standard deviations ($SD_{i}$ for $i \in {ocint, \ldots, guilt}$) are taken from Table 1 on page 1206 in the paper. The same holds for the mean in the errors for the variable $ocint$.
+$$ocint  := \epsilon_{ocint}$$
+$$ocdis := 3 \cdot ocint + \epsilon_{ocdis}$$
+$$occon := 4 \cdot ocdis + \epsilon_{occon}$$
+$$sad := 2 \cdot ocdis + 1 \cdot occon + \epsilon_{sad}$$
+$$insom := 2 \cdot sad + \epsilon_{insom}$$ 
+$$concen :=  1 \cdot ocint + 4 \cdot insom + \epsilon_{concen}$$
+$$guilt := 1 \cdot concen + 1 \cdot sad + \epsilon_{guilt}$$
+,where $\epsilon_{ocint}, \ldots, \epsilon_{guilt} \stackrel{iid}{\sim} N(0 , SD_{i})$ with $i \in {ocint, \ldots, guilt}$.  
 
-We came up with the intercept and regression coefficients ourselves. To determine them, we took the DAG and the thickness of the arrows on page 1211 into account and adjusted them to the DAG we chose.
+We base our estimates of the intercepts and residual standard deviations (SD) on the data from McNally et al. (2017), where they interviewed 408 patients for the OCD and depression symptoms. Intercepts and residual SDs are set to the mean and SD values of the corresponding item (symptom) that they found. The regression coefficients are decided such that it could represent the relative strength (effect) of each item we have thought of, considering the size of SD for each item.
 
-## 3. Set a seed in R. Generate data from your SCM with a sample size of 500 units
-```{r, message=FALSE}
-## With mean based on the data
-# Setting a seed
-set.seed(1705)
 
-# Defining the sample size
-n <- 1500
-
-#Generating Data
-#with means
-ocint <- rnorm(n, 2.69, 0.82)
-ocdis <- 3.5 * ocint + rnorm(n, 2.81, 0.76)
-occon <- 3 * ocdis + rnorm(n, 2.67, 0.76)
-sad <- 2.3 * ocdis + 1 * occon + rnorm(n, 1.55, 0.94)
-insom <- 2 * sad + rnorm(n, 0.81, 1.07)
-concen <-  1 * ocint + 4 * insom + rnorm(n, 1.48, 0.87)
-guilt <- 1.5 * concen + 3.3 * sad + rnorm(n, 1.56, 1.17)
-
-#Creating the data set
-OCDDEP<- data.frame(ocint, ocdis, occon, sad, insom, concen, guilt)
-
-suffStat <- list(C= cor(OCDDEP), n = nrow(OCDDEP))
-
-varnames <- colnames(OCDDEP)
-pc_fit <- pc(suffStat = suffStat, indepTest = gaussCItest, alpha = 0.01, 
-              labels = varnames)
-
-# plot the estimated CPDAG 
-if (require(Rgraphviz)) { 
-  plot(pc_fit, main = "Inferred CPDAG using PC algorithm")
-}
-
-# better with igraph?
-library(igraph)
-iplotPC(pc_fit)
-```
+## 3. Generate data from your SCM with a sample size of 500 units.  
 
 ```{r}
-## With mean = 0
+# set the seed
+set.seed(1000)
 
-# Setting a seed
-set.seed(1705)
+# sample size (n) = 500
+n <- 500
 
-# Defining the sample size
-n <- 1500
+# generate the data
+ocint <- 2.69 + rnorm(n, 0, 0.82)
+ocdis <- 2.81 + 3.5 * ocint + rnorm(n, 0, 0.76)
+occon <- 2.67 + 3 * ocdis + rnorm(n, 0, 0.76)
+sad <- 1.55 + 4.3 * ocdis + 2 * occon + rnorm(n, 0, 0.94)
+insom <- 0.81 + 2 * sad + rnorm(n, 0, 1.07)
+concen <-  1.48 + 2 * ocint + 3 * insom + rnorm(n, 0, 0.87)
+guilt <- 1.56 + 1.5 * concen + 3.3 * sad + rnorm(n, 0, 1.17)
 
-#Generating the data
-#with means = 0
-ocint <- rnorm(n, 0, 0.82)
-ocdis <- 3 * ocint + rnorm(n, 0, 0.76)
-occon <- 4 * ocdis + rnorm(n, 0, 0.76)
-sad <- 2 * ocdis + 1 * occon + rnorm(n, 0, 0.94)
-insom <- 2 * sad + rnorm(n, 0, 1.07)
-concen <-  1 * ocint + 4 * insom + rnorm(n, 0, 0.87)
-guilt <- 1 * concen + 1 * sad + rnorm(n, 0, 1.17)
-
-#Creating the data set
-OCDDEP<- data.frame(ocint, ocdis, occon, sad, insom, concen, guilt)
-
-suffStat <- list(C= cor(OCDDEP), n = nrow(OCDDEP))
-
-varnames <- colnames(OCDDEP)
-pc_fit <- pc(suffStat = suffStat, indepTest = gaussCItest, alpha = 0.01, 
-              labels = varnames)
-
-# plot the estimated CPDAG 
-if (require(Rgraphviz)) { 
-  plot(pc_fit, main = "Inferred CPDAG using PC algorithm")
-}
-
-# better with igraph?
-library(igraph)
-iplotPC(pc_fit)
-
+# putting them in a dataframe called "OCDDEP"
+OCDDEP <- data.frame(ocint, ocdis, occon, sad, insom, concen, guilt)
 ```
 
 ## 4. Use the PC-algorithm on the generated data to ‘discover’ the structure of your causal system
-a. Is your true DAG covered in the Markov equivalence class provided by the algorithm?
-Estimate the CPDAG
-```{r}
-# suffStat_OCD <- list(C = cor(OCDdata), n = nrow(OCDdata))
-# 
-# pc_OCD <- pc(suffStat = suffStat_OCD, indepTest = gaussCItest, p = ncol(OCDdata), alpha = 0.01)
-# 
-# plot(pc_OCD, main = " Inferred CPDAG using pcalg")
+
+### a. Is your true DAG covered in the Markov equivalence class provided by the algorithm?
+No, our true DAG is not covered in the Markov equivalence class. A couple of edges are missing (e.g., *ocint* --> *concen*, *ocdis* --> *occon*).
+
+```{r pcalg, message=FALSE, out.width="90%", fig.cap="Inferred CPDAG using pcalg", fig.align='center'}
+# sufficient statistics: correlation matrix + sample size
+suffStat <- list(C= cor(OCDDEP), n = nrow(OCDDEP))
+
+# run the pc algorithm
+varnames <- colnames(OCDDEP)
+pc_fit <- pc(suffStat = suffStat, indepTest = gaussCItest, alpha = 0.01, 
+              labels = varnames)
+
+# # plot the Markov equivalence class 
+# if (require(Rgraphviz)) { 
+#   p1 <- plot(pc_fit, main = "Inferred CPDAG using PC algorithm")
+# }
+laymat <- rbind(c(-0.5, 1),
+                c(-1, 0),
+                c(-0.5, -1),
+                c(0, 0),
+                c(0, 0.5),
+                c(0.5, 1),
+                c(1, 0))
+
+par(mar=c(5, 4, 3.5, 2) + 0.1)
+
+cpdag_mat <- as(pc_fit, "matrix")
+qgraph(t(cpdag_mat), bidirectional=TRUE, color=c("white","salmon", "white", 
+                                                 "white", "white", "white", "lightblue"), 
+       layout = laymat, labels = varnames)
+title("Inferred CPDAG using PC algorithm", line=3, cex.main = 1) 
 ```
 
 
-b. Provide the CP-DAG. To what extent did the procedure correctly recover which relationship were absent/present/directed?
+
+### b. Provide the CP-DAG. To what extent did the procedure correctly recover which relationship were absent/present/directed?
+
+```{r markov-equivalence set, fig.cap="Markov-Equivalence Set", fig.align='center'}
+# extract the DAG adjacency matrix in a vector form (by rows)
+res1 <- pdag2allDags(cpdag_mat)
+
+# get the adjacency matrix of an individual DAG 
+res1_dags <- list()
+for(i in 1 :nrow(res1$dags)){
+  res1_dags[[i]] <- t(matrix(res1$dags[i,], 7, 7, byrow = T))
+}
+
+# plot the DAG for each adj.matrix
+par(mfrow=c(1,2))
+for (i in 1:length(res1_dags)){
+  qgraph(res1_dags[[i]], bidirectional=TRUE, color=c("white","salmon", "white", 
+                                                 "white", "white", "white", "lightblue"), 
+       layout = laymat, labels = varnames)
+}
+
+```
 
 
 ## 5. data. Choose two variables for which they should estimate the causal relationship
@@ -187,7 +177,8 @@ b. Outcome variable: *guilt*
 
 ## 6. For the causal effect specified in 5
 a. What is the true causal effect of the cause on the outcome variable based on your SCM?
-
+path1  
+path2
 ```{r}
  1 * 2 + 1 * 4 * 2 * 2 + 1 * 1 * 4
 ```
