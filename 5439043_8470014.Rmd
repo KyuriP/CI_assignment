@@ -1,0 +1,395 @@
+---
+title: \vspace{-1.5cm} Causal Inference - Assignment Part1
+author: 
+- "Emilia Löscher 8470014" 
+- "Kyuri Park 5439043"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+\fontsize{11}{15}
+\selectfont
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(qgraph)
+library(dagitty)
+library(ggdag)
+library(dplyr)
+library(pcalg)
+library(ggplot2)
+library(ggpubr)
+```
+
+## 1. Draw a DAG representing a simple and fairly plausible causal system from your preferred topic of choice. Describe briefly the substantive motivation behind your DAG. 
+Many people with Obsessive-compulsive disorder (OCD) become depressed. According to Millet et al. (2004), the lifetime rates of major depression in OCD patients is about 81.2%. Several studies attempted to identify the causal mechanism in the comorbidity of OCD and depression (McNally et al.2017; Zandberg et al. 2015) and speculated that OCD symptoms often precede and correspondingly activate the depression symptoms.  
+
+Given this background, here we proceed to look into the causal relationship between the symptoms of OCD and depression. We hypothesize that *distress associated with obsession* (*'ocdis'*) causes *feeling of guilt* (*'guilt'*) via several paths. Having been inspired by the DAG model from McNally et al. (2017), we construct our DAG with total 7 variables (nodes), which consist of OCD symptoms as well as depression symptoms. The specifics of the variables in our DAG is as follows:  
+
+< OCD symptoms >
+
+ - **ocdis**: distress caused by obsessions/compulsions
+ - **ocint**: interference due to obsessions/compulsions
+ - **occon**: difficulty controlling obsessions/compulsions
+
+< Depression symptoms >  
+
+ - **sad**: sadness 
+ - **insom**: insomnia/sleeping problems 
+ - **concen**: concentration/decision-making impairment
+ - **guilt**: guilt and self-blame 
+
+See *Figure 1* below for our DAG.  
+***Note:*** All the code for the figures can be found in the *Appendix* at the end of the document.
+
+```{r plotdag, out.width="80%", fig.cap="OCD-Depression DAG", fig.align='center', echo=FALSE}
+
+# varnames <- c("ocint", "ocdis", "occon", "sad", "insom", "concen", "guilt")
+# Adj <- matrix(c(0,1,0,0,0,1,0,
+#                 0,0,1,1,0,0,0,
+#                 0,0,0,1,0,0,0,
+#                 0,0,0,0,1,0,1,
+#                 0,0,0,0,0,1,0,
+#                 0,0,0,0,0,0,1,
+#                 0,0,0,0,0,0,0), 7,7, byrow = TRUE, dimnames = list(varnames, varnames))
+# 
+# qgraph(Adj, labels = varnames, layout= "groups", theme="classic")
+
+# plot our DAG using dagify
+ocddep <- dagify(
+  ocdis ~ ocint,
+  occon ~ ocdis,
+  sad ~ ocdis + occon,
+  insom ~ sad,
+  concen ~ ocint + insom,
+  guilt ~ concen + sad,
+  exposure = "ocdis", # cause variable we are interested in
+  outcome = "guilt", # outcome variable we are interested in
+  # set the coordinates
+  coords = list(x = c(ocdis = -1, ocint=-0.5, occon=-0.5, sad = 0, 
+                      insom=0, concen=0.5, guilt = 1),
+              y = c(ocdis = 0, ocint=1, occon=-1, sad = 0, insom=0.5, 
+                    concen=1, guilt = 0)) 
+)
+
+ggdag_status(ocddep) + theme_dag()
+```
+
+
+
+\newpage
+## 2. Specify a structural causal model for your DAG. Assume all relationships between the variables are linear, and all the variables have normally distributed residuals.  
+
+In the following, the structural causal model for our DAG is specified:
+
+
+$$ocint  := 2.69 + \epsilon_{ocint}$$
+$$ocdis := 2.81 + 3.52 \cdot ocint + \epsilon_{ocdis}$$
+$$occon := 2.67 + 3.38 \cdot ocdis + \epsilon_{occon}$$
+$$sad := 1.55 + 4.33 \cdot ocdis + 2.98 \cdot occon + \epsilon_{sad}$$
+$$insom := 0.81 + 2.17 \cdot sad + \epsilon_{insom}$$ 
+$$concen :=  1.48 + 2.54 \cdot ocint + 3.46 \cdot insom + \epsilon_{concen}$$
+$$guilt := 1.56 + 1.57 \cdot concen + 3.31 \cdot sad + \epsilon_{guilt},$$
+where $\epsilon_{ocint}, \ldots, \epsilon_{guilt} \stackrel{iid}{\sim} N(0 , \sigma^2_{i})$ with $i \in {ocint, \ldots, guilt}$ and $\sigma_{i} \in \{0.82, 0.76, 0.76, 0.94, 1.07, 0.87, 1.17\}$.  
+
+<br>  
+We base our estimates of the intercepts and residual standard deviations (SD) on the data from McNally et al. (2017). They interviewed 408 patients about their OCD and depression symptoms. Intercepts and residual SDs are set to the mean and SD values of the corresponding item (symptom) that they found. The regression coefficients are decided such that it could represent the relative strength (effect) of each symptom we have thought of, considering the size of SD for each item.
+
+
+## 3. Generate data from your SCM with a sample size of 500 units.  
+
+```{r}
+# set the seed
+set.seed(1000)
+
+# sample size (n) = 500
+n <- 500
+
+# generate the data
+ocint <- 2.69 + rnorm(n, 0, 0.82)
+ocdis <- 2.81 + 3.52 * ocint + rnorm(n, 0, 0.76)
+occon <- 2.67 + 3.38 * ocdis + rnorm(n, 0, 0.76)
+sad <- 1.55 + 4.33 * ocdis + 2.98 * occon + rnorm(n, 0, 0.94)
+insom <- 0.81 + 2.17 * sad + rnorm(n, 0, 1.07)
+concen <-  1.48 + 2.54 * ocint + 3.46 * insom + rnorm(n, 0, 0.87)
+guilt <- 1.56 + 1.57 * concen + 3.31 * sad + rnorm(n, 0, 1.17)
+
+# create a data frame called "OCDDEP"
+OCDDEP <- data.frame(ocint, ocdis, occon, sad, insom, concen, guilt)
+```
+
+## 4. Use the PC-algorithm on the generated data to ‘discover’ the structure of your causal system
+
+### a. Is your true DAG covered in the Markov equivalence class provided by the algorithm?
+No, as seen in *Figure 2*, our true DAG is not covered in the Markov equivalence class. One of the edges is missing (e.g., *ocint* $\rightarrow$ *concen*). Among the given Markov equivalence class set, DAG *(l)* -- the one in the right bottom in *Figure 2* -- is the closest to the true DAG structure, as it has all edges with the correct direction, except for the one missing edge between *ocint* $\rightarrow$ *concen*.
+
+
+```{r pcalg, message=FALSE, echo=FALSE}
+# sufficient statistics: correlation matrix + sample size
+suffStat <- list(C= cor(OCDDEP), n = nrow(OCDDEP))
+
+# run the pc algorithm
+varnames <- colnames(OCDDEP)
+pc_fit <- pc(suffStat = suffStat, indepTest = gaussCItest, alpha = 0.01, 
+              labels = varnames)
+```
+
+```{r markov equivalence set, fig.cap="Estimated Markov-Equivalence Class", fig.height=28, fig.width=18, echo=FALSE}
+# extract the adjacency matrix of the cpdag
+cpdag_mat <- as(pc_fit, "matrix")
+
+# extract the DAG adjacency matrix in a vector form (by rows)
+res1 <- pdag2allDags(cpdag_mat)
+
+# get the adjacency matrix of an individual DAG 
+res1_dags <- list()
+for(i in 1 :nrow(res1$dags)){
+  res1_dags[[i]] <- t(matrix(res1$dags[i,], 7, 7, byrow = T))
+}
+
+# specify a layout matrix
+laymat <- rbind(c(-0.5, 1),
+                c(-1, 0),
+                c(-0.5, -1),
+                c(0, 0),
+                c(0, 0.5),
+                c(0.5, 1),
+                c(1, 0))
+
+
+# plot the DAG for each adj.matrix
+par(mfrow=c(6,2))
+for (i in 1:length(res1_dags)){
+  qgraph(res1_dags[[i]], bidirectional=TRUE, color=c("white","salmon", "white", 
+                                                 "white", "white", "white", "lightblue"), 
+       layout = laymat, labels = varnames, asize = 5, vsize =14, 
+       title = paste0("(",letters[i],")"), title.cex=3)
+}
+
+```
+
+
+### b. Provide the CP-DAG. To what extent did the procedure correctly recover which relationship were absent/present/directed?
+
+As shown in *Figure 3* (CP-DAG), the procedure correctly recovered most of the relationships (edges) present in our true DAG. In other words, the procedure estimated the skeleton of the true DAG pretty well. The only relationship that was absent in the CP-DAG was the one connecting *ocint* and *concen*.  
+Yet, the procedure did not identify the complete set of colliders in the true DAG and correspondingly failed to orient some of the edges. It was successful in doing so for *guilt* (*sad* $\rightarrow$ *guilt* $\leftarrow$ *concern*). That is, out of the three colliders  (i.e., *sad*, *concen*, *guilt*) in the true DAG, only *guilt* has been successfully recognized by the procedure. 
+ 
+
+```{r cpdag, fig.cap="Completed Partially Directed Acyclic Graph (CPDAG)", echo=FALSE, out.width="80%", fig.align='center'}
+# # plot the CPDAG
+# if (require(Rgraphviz)) { 
+#   p1 <- plot(pc_fit, main = "Inferred CPDAG using PC algorithm")
+# }
+
+# adjust the plotting margin 
+par(mar=c(5, 4, 3.5, 2) + 0.1)
+
+# plot the CP-DAG using qgraph
+qgraph(pc_fit, color=c("white","salmon", "white", 
+                                                 "white", "white", "white", "lightblue"), 
+       layout = laymat, labels = varnames)
+title("Inferred CPDAG using PC algorithm", line=3, cex.main = 1) 
+
+```
+
+
+
+\newpage
+## 5. Choose two variables for which they should estimate the causal relationship
+a. Cause variable: `ocdis`    
+b. Outcome variable: `guilt`  
+
+
+## 6. For the causal effect specified in 5:
+### a. What is the true causal effect of the cause on the outcome variable based on your SCM?  
+We use two different ways to find the true causal effect:   
+1) Summing the effects of all valid paths between *ocdis* and *guilt*.   
+2) Mimicking the intervention on *ocdis*: fixing *ocdis* to a certain value and see the change in *guilt* when increasing *ocdis* by one point.    
+As seen below, the true causal effect for both methods are found to be around *217*.  
+
+
+*-- Method 1*) There are total four valid causal paths between *ocdis* and *guilt*. And summing the effect of each valid path would give us the true causal effect estimate.  
+
+The valid causal paths are listed below:  
+
+ - path1) *ocdis* $\rightarrow$  *sad* $\rightarrow$ *guilt*
+ - path2) *ocdis* $\rightarrow$ *occon* $\rightarrow$ *sad* $\rightarrow$ *guilt*
+ - path3) *ocdis* $\rightarrow$ *sad* $\rightarrow$ *insom* $\rightarrow$ *concen* $\rightarrow$ *guilt*
+ - path4) *ocdis* $\rightarrow$ *occon* $\rightarrow$ *sad* $\rightarrow$ *insom* $\rightarrow$ *concen* $\rightarrow$ *guilt*
+ 
+ 
+ 
+```{r}
+## Method 1: Analytical solution
+# path 1 
+path1 <- 4.33 * 3.31
+# path 2
+path2 <- 3.38 * 2.98 * 3.31
+# path 3
+path3 <- 4.32 * 2.17 * 3.46 * 1.57
+# path 4
+path4 <- 3.38 * 2.98 * 2.17 * 3.46 * 1.57
+
+# true causal effect
+TCE1 = path1 + path2 + path3 + path4
+cat("True causal effect =", TCE1)
+```
+
+
+*-- Method 2*) For this method, we compute the true causal effect by taking the difference between the expected value of *guilt* when *ocdis* is set to 12 and when it is one point higher, at 13 (it is not necessary but we set it to 12, because the mean value of *ocdis* is around 12 in the generated data). This is essentially mimicking an intervention by fixing *ocdis* to a certain value and and check the corresponding effect on *guilt* when *ocids* is increased by 1 point, while the other variables are held constant.
+
+```{r}
+## Method 2: Mimicking intervention on ocdis
+# 'ocdis' is set to 12
+ocint2 <-  2.69
+ocdis2 <- 12     # fix "ocdis" to 12
+occon2 <- 2.67 + 3.38 * ocdis2
+sad2 <- 1.55 + 4.33 * ocdis2 + 2.98 * occon2
+insom2 <- 0.81 + 2.17* sad2
+concen2 <-  1.48 + 2.54 * ocint2 + 3.46 * insom2
+guilt2 <- 1.56 + 1.57 * concen2 + 3.31 * sad2 
+
+# 'ocdis' is set to 13: one point higher
+ocint3 <-  2.69
+ocdis3 <- 13     # fix "ocdis" to 13
+occon3 <- 2.67 + 3.38 * ocdis3
+sad3 <- 1.55 + 4.33 * ocdis3 + 2.98 * occon3
+insom3 <- 0.81 + 2.17* sad3
+concen3 <-  1.48 + 2.54 * ocint3 + 3.46 * insom3 
+guilt3 <- 1.56 + 1.57 * concen3 + 3.31 * sad3 
+
+# true causal effect = change in the expected value of guilt when 'ocdis' increases by 1
+TCE2 <- guilt3 - guilt2
+cat("True causal effect =", TCE2)
+```
+
+
+### b. Based on the true DAG, what linear regression model should be used to estimate the causal effect correctly?  
+Here we block the backdoor path by controlling for *ocint* in the regression model.  
+The linear regression model to estimate the causal effect of *ocdis* on *guilt* can, therefore, be written as:  
+
+$$guilt_i = \beta_{0} + \beta_{1}ocdis_i + \beta_{2}ocint_i + \epsilon_i, \; \text{with } \epsilon_i \stackrel{iid}{\sim} \mathcal{N}(0, \tilde{\sigma}^2), \;  \forall\, i = 1, \ldots, n$$
+
+With $\tilde{\sigma}^2$ being the residual standard deviation that is different from all of the
+$\sigma_i$ used in 2.
+
+```{r}
+# find the variable needed to be controlled for.
+adjustmentSets(ocddep)
+```
+
+
+### c. Estimate the causal effect with this regression model based on your generated data. To what extent is the true effect recovered?  
+
+Based on the linear regression model specified in *6b*, the causal effect of *ocdis* on *guilt* is estimated to be around 216. Given that the true causal effect is approximately 217 as shown in *6a*, it is concluded that the true causal effect is mostly recovered. This slight discrepancy between the estimated and true causal effect can be even reduced by increasing the sample size (e.g., with the sample size of 3000, the estimated causal effect of *ocdis* on *guilt* is 217).     
+
+<!-- When we estimate the causal effect with the help of the regression model based on our generated data, we obtain an estimate of 216.17. As the true underlying causal effect is 217.45, we come pretty close to recovering the true causal effect.   -->
+<!-- Furthermore, we discovered that if we increase the sample size, the estimated causal effect comes even closer to the true value. -->
+
+```{r}
+# linear model estimating causal effect of 'ocdis' on 'guilt' while controlling for 'ocint'
+mod <- lm(guilt ~ ocdis + ocint, data = OCDDEP)
+round(summary(mod)$coefficients, 4)
+```
+
+
+## 7. For assignment Part II, we will need a dichotomous cause variable.
+### a. Make a dichotomized version of the cause variable from question 5 & 6 in your dataset, for example by assigning scores lower than the mean a 0 and the rest a 1.  
+We dichotomized *ocdis* based on its mean value in such a way that assigning 0 for the scores lower than the mean value and assigning 1 for the scores higher than the mean value. See *Figure 4* for the distribution of the dichotomized variable. 
+
+```{r dichotomizing}
+# dichotomized version of 'ocdis' = 'dicho_ocdis'
+OCDDEP$dicho_ocdis <- ifelse(ocdis < mean(ocdis), 0, 1)
+# the number of observations in each category
+table(OCDDEP$dicho_ocdis)
+```
+
+```{r, dichoplots,fig.height=3, fig.width=7, fig.align='center', message=FALSE, echo=FALSE, fig.cap="Dichotomizing 'ocdis' based on the mean value"}
+
+# plot the histogram of 'ocdis' and the reference line at the mean value
+p1 <- ggplot(OCDDEP, aes(ocdis, fill=ocdis < mean(ocdis))) + 
+  geom_histogram(color="black", show.legend = FALSE) +
+  scale_fill_manual(values=c("lightblue", "salmon"))+
+  ggtitle("raw value of 'ocdis'")+
+  geom_vline(aes(xintercept = mean(ocdis), colour = "mean"),linetype = "dashed") + 
+  scale_color_manual(values = c("mean" = "red")) +
+  theme_minimal()
+
+# plot the dichotomized version of 'ocdis' based on the mean value
+p2 <- ggplot(OCDDEP, aes(dicho_ocdis, fill=as.factor(dicho_ocdis))) + 
+  geom_histogram(color="black",binwidth=1/3, show.legend = TRUE) +
+  scale_fill_manual(values=c("salmon", "lightblue"))+
+  ggtitle("dichotomized 'ocdis'") +
+  labs(fill='dichotomized', x = "dichotomized 'ocdis'") +
+  theme_minimal()
+
+# put two plots (p1 & p2) together side by side
+ggarrange(p1, p2, ncol =2)
+```
+
+### b. Use the correct model for the causal effect (the one from 6b) to estimate the causal effect again, but now with your dichotomized cause variable. Discuss the results.
+
+When we use the dichotomized cause variable (`dicho_ocdis`), then the causal effect of `ocdis` on `guilt` is estimated to be around 174, which is smaller than the estimated causal effect in *6c* with the continous cause variable. Also, the estimate of the average effect of `ocint` (confounder) on `guilt` becomes larger, and it correspondingly becomes significant in this model. 
+Hence, it is concluded that when dichotomizing the cause variable, the true causal effect is somewhat underestimated, while the effect of the variable being controlled for (e.g., confounder) is overestimated. 
+
+<!-- When we use the dichotomized variable in the linear regression model and estimate the causal effect, we see that the obtained estimate is smaller than the true causal effect (174.40 [estimated] vs 217.45 [true]). Hence, the true causal effect of *ocdis* on *guilt* is underestimated when the dichotomized version of *ocdis* is used.  -->
+
+
+```{r}
+# linear model with the dichotomized 'ocdis'
+mod_dichotomized <- lm(guilt ~ dicho_ocdis + ocint, data = OCDDEP)
+round(summary(mod_dichotomized)$coefficients, 4)
+```
+
+
+## 8. Prepare the data for the second causal inference assignment.
+### a. Create a data frame with all your variables, including the continuous and the dichotomized versions of your cause variable. Save it in an .Rdata file.
+```{r}
+# create a RData file
+save(OCDDEP, file = "5439043_8470014.RData")
+```
+
+### b. Make a brief .txt file with in it a description what each of the variables in the dataframe is.
+See `5439043_8470014.txt`.
+
+
+\newpage
+# References
+\begingroup
+\noindent
+\vspace{-2em}
+\setlength{\parindent}{-0.4in}
+\setlength{\leftskip}{0.4in}
+\setlength{\parskip}{15pt}
+\noindent
+
+<div id="refs">  McNally, R.J., Mair, P., Mugno, B.L., & Riemann, B.C. (2017). Co-Morbid Obsessive–Compulsive Disorder and Depression: A Bayesian Network Approach. *Psychological Medicine*. *47*(7): 1204–14. https://doi.org/10.1017/S0033291716003287.
+</div>
+
+<div id="refs">   Millet, B., Kochman, F., Gallarda, T., Krebs, M.O., Demonfaucon, F., Barrot, I., Bourdel, M.C., Olie, J.P., Loo, H., & Hantouche, E.G. (2004). Phenomenological and Comorbid Features Associated in Obsessive–Compulsive Disorder: Influence of Age of Onset. *Journal of Affective Disorders*. *79*(1-3): 241–46.
+</div>
+
+<div id="refs">   Zandberg, L.J., Zang, Y., McLean, C.P., Yeh, R., Simpson, H.B., & Foa, E.B. (2015). Change in Obsessive-Compulsive Symptoms Mediates Subsequent Change in Depressive Symptoms During Exposure and Response Prevention. *Behaviour Research and Therapy*. *68*:76–81.
+</div>
+\endgroup
+
+
+\newpage
+# Appendix
+
+## Code for Figure 1
+
+```{r ref.label="plotdag", echo=TRUE, eval=FALSE}
+```
+
+## Code for PC-algorithm (Figure 2)
+
+```{r ref.label=c("pcalg", "markov equivalence set"), echo=TRUE, eval=FALSE}
+```
+
+## Code for Figure 3
+```{r ref.label="cpdag", echo=TRUE, eval=FALSE}
+```
+
+## Code for Figure 4
+```{r ref.label="dichoplots", echo=TRUE, eval=FALSE}
+```

@@ -1,0 +1,29 @@
+## Causal Inference - Assignment I
+## Authors: Emilia Löscher & Kyuri Park
+## This provides the specification of the "5439043_8470014.RData" file.
+
+## Description
+Loading "5439043_8470014.RData" will restore the "OCDDEP" data set.
+OCDDEP is a hypothetical dataset that contains scores on 
+OCD (obsessive-compulsive disorder) and depression symptoms for 500 people. 
+Given the high comorbidity between OCD and depression, this data set is created in order 
+to investigate the (causal) links between each of the symptom variables.  
+
+## Format
+OCDDEP is a data frame with 500 cases (rows) and 8 variables (columns), 
+where each of the variables are either OCD or depression symptoms. 
+Each symptom is considered as a continuous variable (i.e., measured on continuous scale). 
+OCD symptoms are named "ocint", "ocdis", "occon", and "dicho_ocdis". 
+Depression symptoms are named "sad", "insom", "concen", and "guilt".
+
+## Overview of variables
+ocint - interference due to obsessions/compulsions 
+ocdis - distress caused by obsessions/compulsions (MAIN CAUSE OF INTEREST)
+dicho_ocdis - dichotomized version of ocdis (MAIN CAUSE OF INTEREST - dichotomized)
+occon - difficulty controlling obsessions/compulsions 
+sad - sadness 
+insom - insomnia/sleeping problems
+concen - concentration/decision-making impairment 
+guilt - guilt and self-blame (MAIN OUTCOME OF INTEREST)
+
+
