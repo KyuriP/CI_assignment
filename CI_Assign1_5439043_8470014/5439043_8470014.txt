@@ -7,13 +7,14 @@ Loading "5439043_8470014.RData" will restore the "OCDDEP" data set.
 OCDDEP is a hypothetical dataset that contains scores on 
 OCD (obsessive-compulsive disorder) and depression symptoms for 500 people. 
 Given the high comorbidity between OCD and depression, this data set is created in order 
-to investigate the (causal) links between each of the symptom variables.  
+to investigate the potential (causal) links between each of the symptom variables.  
 
 ## Format
 OCDDEP is a data frame with 500 cases (rows) and 8 variables (columns), 
 where each of the variables are either OCD or depression symptoms. 
-Each symptom is considered as a continuous variable (i.e., measured on continuous scale). 
-OCD symptoms are named "ocint", "ocdis", "occon", and "dicho_ocdis". 
+Each symptom is considered as a continuous variable (i.e., measured on continuous scale)
+except for "dicho_ocdis"(dichotomized version of "ocdis") which is a categorical variable. 
+OCD symptoms are named "ocint", "ocdis", "occon", and "dicho_ocdis"(dichotomized version of "ocdis"). 
 Depression symptoms are named "sad", "insom", "concen", and "guilt".
 
 ## Overview of variables
