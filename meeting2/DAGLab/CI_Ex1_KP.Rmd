@@ -1,0 +1,864 @@
+---
+title: "CI_EX1_KP"
+author: "Kyuri Park 5439043"
+date: "2/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(qgraph)
+library(dagitty)
+library(ggdag)
+library(dplyr)
+
+library(pcalg)
+library(graph)
+library(RBGL)
+library(Rgraphviz)
+```
+
+```{r, echo=FALSE, eval=FALSE}
+## 1. Data and Packages
+
+# packages for working with DAGs
+install.packages("qgraph")
+install.packages("dagitty")
+install.packages("ggdag")
+
+# packages for testing independence of variables
+install.packages("CondIndTests")
+install.packages("dHSIC")
+install.packages("ppcor")
+install.packages("pcalg")
+
+# The graph, RBGL & Rgraphviz packages are needed for pcalg
+# but are only available on Bioconductor but not CRAN
+if (!requireNamespace("BiocManager", quietly = TRUE)){
+  install.packages("BiocManager")
+}
+BiocManager::install("graph")
+BiocManager::install("RBGL")
+BiocManager::install("Rgraphviz")
+```
+
+## 2. Graphs and Adjacency Matrices
+There are many different ways to draw DAGs in R. Here we introduce you to two.
+
+For the first approach, we need to introduce some general terminology that is used for graphical models. In the graphical modeling literature, the edges in a graph are represented by an **adjacency matrix**, typically denoted A. This is simply a p $\times$ p matrix of 0’s and 1’s indicating which of the p variables share an edge. $A_{ij}=1$ indicates that there is an arrow from variable i to variable j, that is Xi --> Xj
+
+For example, the three-variable "collider" DAG
+```{r}
+# collider DAG
+varnames <- c("X","Y","Z")
+Adj <- matrix(c(0,0,1,
+                0,0,1,
+                0,0,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj, 
+       labels = c("X","Y","Z"), # not necessary if Adj has dimnames
+       #you can provide a custom layout by giving the x-y co-ordinates of each node
+       layout = rbind(c(-1,-1),
+                      c(1,-1),
+                      c(0,1)))
+# chain DAG
+Adj <- matrix(c(0,0,1,
+                0,0,0,
+                0,1,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj, 
+       labels = c("X","Y","Z"), # not necessary if Adj has dimnames
+       #you can provide a custom layout by giving the x-y co-ordinates of each node
+       layout = rbind(c(-1,-1),
+                      c(1,-1),
+                      c(0,1)))
+
+# fork DAG
+Adj <- matrix(c(0,0,0,
+                0,0,0,
+                1,1,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj, 
+       labels = c("X","Y","Z"), # not necessary if Adj has dimnames
+       #you can provide a custom layout by giving the x-y co-ordinates of each node
+       layout = rbind(c(-1,-1),
+                      c(1,-1),
+                      c(0,1)))
+
+```
+A second helpful way of plotting DAGs is using the ggdag package. ggdag provides an interface between ggplot and the dagitty package, a package designed to make DAG-based analysis easier. This means you can do things like derive adjustment sets and list paths in a DAG once you’ve defined it as an object. 
+
+We can create the collider DAG using the syntax below
+```{r}
+# collider DAG using ggdag
+coldag <- dagify(
+  Z ~ X + Y,
+  exposure = "X", # the "cause" variable you are interested in
+  outcome = "Y", # the "effect" variable you are interested in
+  # optional: give co-ordinates of the variables in the plot
+  coords = list(x = c(X = -1, Y = 1, Z = 0),
+                y = c(X = 0, Y = 0, Z = 1)) 
+) 
+ggdag_status(coldag) + theme_dag()
+
+#  Re-create the chain and fork DAGs in the lecture using the ggdag package.
+# chain dag
+chaindag <- dagify(
+  Z ~ X, Y ~ Z,
+  exposure = "X", 
+  outcome = "Y", 
+  # optional: give co-ordinates of the variables in the plot
+  coords = list(x = c(X = -1, Y = 1, Z = 0),
+                y = c(X = 0, Y = 0, Z = 1)) 
+) 
+ggdag_status(chaindag) + theme_dag()
+
+# fork dag
+forkdag <- dagify(
+  X ~ Z,  Y ~ Z,
+  exposure = "X", # the "cause" variable you are interested in
+  outcome = "Y", # the "effect" variable you are interested in
+  # optional: give co-ordinates of the variables in the plot
+  coords = list(x = c(X = -1, Y = 1, Z = 0),
+                y = c(X = 0, Y = 0, Z = 1)) 
+) 
+ggdag_status(forkdag) + theme_dag()
+```
+ 
+## 3. d-seperation and DAGs
+
+```{r}
+eddag <- dagify(
+  EA ~ CI,
+  AI ~ CI + EA + U,
+  Inc ~ EA + CI + AI + U ,
+  exposure = "EA", # the "cause" variable you are interested in
+  outcome = "Inc", # the "effect" variable you are interested in
+  # optional: give co-ordinates of the variables in the plot
+  coords = list(x = c(EA = -1,CI = 0,AI =0 ,Inc =1 , U = -1),
+                y = c(EA = 0,CI =1 ,AI = -1,Inc = 0, U = -1)) 
+) 
+ggdag_status(eddag) + theme_dag()
+```
+
+▸ List all of the paths between EA and Inc in the DAG. Tip: There are seven in total.  
+
+- EA <- CI -> Inc  
+- EA <- CI <- AI -> Inc  
+- EA -> AI -> Inc  
+- EA -> AI <- CI -> Inc  
+- EA -> AI <- U -> Inc  
+- EA <- CI -> AI <- U -> Inc  
+- EA -> Inc  
+
+```{r}
+# check the answer !!! Shows the paths and what is open !!
+paths(eddag, "EA", "Inc")
+```
+
+▸ Based on what you know about the true DAG, try to classify these paths into categories.  
+▸ If we want to estimate the causal effect of EA on Inc, what paths result in non-causal statistical associations and should be blocked?  
+
+ *CI* should be blocked.    
+
+▸ What paths transmit causal associations, and should be left open?  
+ *EA -> Inc* : direct causal effect  --> should be left open.  
+ *EA -> AI -> Inc*: indirect causal effect --> should be left open.    
+
+▸ What paths are already blocked?  
+
+ *EA -> AI <- CI -> Inc* path is already blocked as AI is a collider.   
+ *EA <- CI -> AI <- U -> Inc* path is already blocked as AI is a collider.    
+ *EA -> AI <- U -> Inc*  path is already blocked as AI is a collider.  
+
+▸ If we want to estimate the causal effect of EA on Inc, what is the valid adjustment set? That is, what variable(s) should the researchers condition on? Try to derive this using your d-seperation rules. Check your answer by using adjustmentSets(eddag).  
+ 
+ Just {CI}
+
+```{r}
+# check what needs to be controlled for
+adjustmentSets(eddag)
+adjustmentSets(eddag, type="all")
+```
+
+▸ Imagine our team of researchers is designing their data collection for this study, and they’re trying to decide what variables they need to measure. What is your advice? 
+Based on our analysis of the DAG above, we would only need to collect the variables `EA`, `Inc`, and `CI`. We do not need to measure `U` or `AI`.
+
+ I'd say try to measure at least *CI* and *EA* so that you can control for *CI* while measuring the effect of *EA* on *Inc*.
+ 
+## 4. Predictive vs Causal analysis
+
+```{r}
+# load the data
+mdata <- readRDS('mdata.RDS')
+glimpse(mdata)
+```
+
+### 4.1 Predictive Analysis
+Let's try to analyze this dataset without using any DAG or potential-outcome ideas. Let’s imagine for a moment that we are only interested in predicting the malaria variable, and we are open to using all variable in the dataset.
+
+▸ Build the best prediction model for mal that you can, using every variable in the dataset. The only restriction is that nets should be included as predictor, but otherwise you’re free to approach this however you like. Use your favorite prediction tool.
+
+```{r}
+model <- lm(mal ~ net + Income + health, data = mdata)
+summary(model)
+```
+
+
+▸ Once you’ve done this, try to interpret the predictive relationship in the ensuing model between nets and mal as an estimate of the causal effect. How strong is the causal effect, according to this procedure?  
+  
+ It seems *net* predicts *mal* significantly as using nets (coded as 1) decreases the risk of contracting malaria by 0.5.
+
+### 4.2 Causal Analysis
+▸  Use dagify() to draw the DAG which corresponds with these beliefs about the causal system.  
+```{r}
+maldag <- dagify(
+  mal ~ net + Income,
+  net ~ Income,
+  health ~ Income + mal + net, 
+  exposure = "net", # the "cause" variable you are interested in
+  outcome = "mal", # the "effect" variable you are interested in
+  coords = list(x = c(net = -1, health = 0, Income =0 , mal =1 ),
+                y = c(net = 0, health =1 , Income = -1, mal = 0)) 
+) 
+ggdag_status(maldag) + theme_dag()
+```
+
+
+▸ Using d-separation rules, can you read off what variable(s) you should control for in order to estimate the causal effect of nets on mal? What is the valid adjustment set?  
+ 
+ *Income* variable.
+
+▸ Check your answer to the previous question by using the function adjustmentSets()  
+```{r}
+adjustmentSets(maldag)
+```
+
+▸ Use what you learned in the previous questions to estimate the causal relationship of nets on mal. For now, let’s make the simplifying assumptions that all variables share linear relationships. This means that to get insights into the causal relationship, you should fit a linear regression model where nets as well as the variables in the valid adjustment set are predictors, and mal is the outcome.  
+```{r}
+adj.model <- lm(mal ~ net + Income, data = mdata)
+summary(adj.model)
+```
+
+
+▸ Compare your estimate of the causal parameter with your “causal interpretation” of the predictive relationship. What do you notice?  
+
+ With the *adj.model*, the effect of *net* is estimated to be higher than the previous model including all variables as the predictors. Here, the adj.model predicts that using nets decreases the risk of contracting malaria by 1.
+
+
+## 5. Valid Adjustment Sets
+```{r}
+# load the data
+data <- as.data.frame(readRDS(file = "ex5_data.RDS"))
+glimpse(data)
+```
+
+```{r}
+Adj <- rbind(c(0,0,0,1,0,0,0,0,0), 
+             c(0,0,1,1,0,0,0,0,0), 
+             c(0,0,0,0,0,0,0,1,0), 
+             c(0,0,0,0,1,1,0,0,0), 
+             c(0,0,0,0,0,0,0,0,0), 
+             c(0,0,0,0,0,0,1,1,0), 
+             c(0,0,0,0,0,0,0,0,0), 
+             c(0,0,0,0,0,0,0,0,1), 
+             c(0,0,0,0,0,0,0,0,0))
+
+names <- c("C", "A", "K", "X", "F", "D", "G", "Y", "H")
+dimnames(Adj) = list(names,names)
+
+
+# Make a nice layout (x-y coords)
+laymat <- matrix(
+    c(-1,   1,
+     -.5,   1,
+      .5,   1,
+    -.75,   0,
+    -.75,  -1,
+       0,   0,
+       0,  -1,
+       1,   0,
+       1,  -1),9,2,byrow = T)
+
+vsize =15; esize = 10; asize = 10
+
+qgraph(Adj, 
+        layout = laymat, 
+       vsize =vsize, esize = esize, asize = asize)
+```
+
+```{r}
+library(CondIndTests)
+library(dHSIC)
+
+# The null hypothesis is that C and A are marginally independent. p = .83. We fail to reject the null hypothesis. So, they are statistically independent
+dhsic.test(data[,"C"], data[,"A"])
+```
+
+```{r}
+# From the DAG we know that X and G are independent given D. 
+# We test the null hypothesis that they are independent with alpha of .05. 
+# Resulting p-value = .3. We fail to reject the null hypothesis that they are independent.
+CondIndTest(data[,"X"], data[,"G"], data[,"D"])
+```
+
+▸ Write down *two true* and *two false* conditional independence statements about the above DAG, based on d-seperation rules. Test these statements as we did above.  
+
+- Two TRUE statements:  
+ *"X" and "K" are independent conditional on "A".*   ***This is tested as wrong. why???? (p-value = 0.02) ***  
+ *"F" and "D" are independent conditional on "X".* 
+ *"C" and "F" are independent conditional on "X".*
+```{r}
+CondIndTest(data[,"K"], data[,"X"], data[,"A"])
+CondIndTest(data[,"F"], data[,"D"], data[,"X"])
+CondIndTest(data[,"C"], data[,"F"], data[,"X"])
+```
+
+- Two FALSE statements:  
+ *"X" and "G" are marginally independent.*  
+ *"C" and "A" are independent conditional on "X"*
+ *"D" and "K" are independent conditional on "Y".*  ***This comes with a warning, why???(Finding optimal kernel hyperparams failed with error)***
+```{r}
+dhsic.test(data[,"X"], data[,"G"])
+CondIndTest(data$C, data$A, data$X)
+CondIndTest(data[,"D"], data[,"K"], data[,"Y"])
+```
+
+
+Take it we want to estimate the causal effect of X on Y. Assume linear relationships and Gaussian noise (Note: if non-linear, the size of the effect may differ for different levels of X.)  
+
+
+▸ Use d-separation to find 2 different valid adjustment sets.  
+```{r}
+simpledag <- dagify(
+  X ~ C + A,
+  K ~ A,
+  D ~ X,
+  F ~ X,
+  Y ~ K + D,
+  G ~ D,
+  H ~ Y,
+  exposure = "X",
+  outcome = "Y"
+)
+# this shows all the paths from X to Y
+paths(simpledag, "X", "Y")
+
+# shows the adjustment sets
+adjustmentSets(simpledag)
+adjustmentSets(simpledag, type="all")
+```
+
+ {A}, {K}, {A, K}
+ 
+
+▸ Assume linear relationships and Gaussian noise. Estimate the causal effect twice, once using each adjustment set. Note: The true causal effect of this simulated 
+dataset is equal to two. Did you (approximately) obtain the correct result?  
+ 
+ Yes, both estimated effects result in about *1.9*.
+
+```{r}
+# adjustment set: {A}
+mod1 <- lm(Y ~ X + A , data = data)
+summary(mod1)
+
+#adjustment set: {A, K}
+mod2 <- lm(Y ~ X + A + K , data = data)
+summary(mod2)
+```
+
+
+▸ Input the DAG in this exercise into dagitty. Get all valid adjustment sets and check your answers to the earlier exercise.  
+
+```{r}
+g <- dagitty("dag{
+        X[exposure]
+        Y[outcome]
+        C -> X
+        A -> X
+        X -> F
+        A -> K
+        K -> Y
+        X -> D
+        D -> G
+        D -> Y
+        Y -> H
+}")
+
+# this shows all the paths from X to Y !!!
+paths(g, "X", "Y")
+
+adjustmentSets(g, type = "all")
+adjustmentSets(g, type = "minimal")
+
+```
+
+## 6. Generating Data from an SCM
+
+▸ Plot the DAG associated with this SCM.  
+
+```{r}
+varnames <- c("X","Y","Z")
+Adj <- matrix(c(0,1,0,
+                0,0,0,
+                1,1,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj)
+
+# using dagitty
+gdag1 <- dagitty("dag{X <- Z 
+                Y <- X
+                Y <- Z
+                }")
+coordinates(gdag1) <- list(x=c(X=0,Y=2,Z=1), y=c(X=1,Y=1,Z=0))
+plot(gdag1)
+
+gdag2 <- dagify(X ~ Z , Y ~ X + Z,
+                exposure = "X",
+                outcome = "Y",
+                coords = list(x=c(X=0,Y=2,Z=1), y=c(X=1,Y=1,Z=0)))
+ggdag_status(gdag2) + theme_dag()
+
+```
+
+▸ Generate data based on this SCM. To do this:  
+
+Specify a sample size for the data you wish to generate (call it n, for example.)
+Figure out which variable you need to generate first (Hint: start with exogenous variables, variables that are solely predictors in the model and do not serve as a dependent variable.)  
+You can use function rnorm() to sample random values from a normal distribution, for you specified sample size. Pick the appropriate mean and standard deviation based on the SCM.  
+Calculate dependent variables using your generated predictor variables, the regression coefficient values specified in the SCM, and generate residuals with rnorm().  
+```{r}
+# set the seed
+set.seed(123)
+# pick a sample size
+n <- 5000
+# generating variables
+Z <- rnorm(n, mean = 0 , sd = 1)
+X <- rnorm(n, mean = 2*Z, sd = 1)
+Y <- rnorm(n, mean = X + 2*Z, sd = 1)
+```
+
+▸ Using the simulated data, estimate the causal effect of X on Y. Here we are pretending to be researchers who know something about the SCM (the DAG and that the relationships are linear), and want to estimate a causal effect from observational data.  
+
+```{r}
+# estimate the causal effect of X on Y
+mod3 <- lm(Y ~ X + Z)
+summary(mod3)
+```
+
+## 7. Causal Discovery using Conditional Independence Methods
+
+### 7.1 Do-it-yourself CI based discovery
+```{r}
+# load the data
+data <- readRDS("data_cd_ex1.RDS")
+glimpse(data)
+```
+
+▸ Write down all possible conditional and marginal independence relations it is possible to test in this dataset. We have four variables in total, so that means we need to test: a) all marginal dependencies, b) all conditional dependencies where we condition on one other variable, and c) all conditional dependencies where we condition on two other variables. There are 24 in total!  
+
+**a)**
+```{r}
+variables <- colnames(data)
+marginal_string <- t(combn(variables,2))
+colnames(marginal_string) <- c("DV1", "DV2")
+```
+
+**b)**  
+```{r}
+# We next list all of the conditional relationships. First, all possible conditional relationships given a single conditioning variable
+# There are 6 x 2 = 12 of these (each bivariate relationship conditioned on each of the other remaining two variables)
+cond1_string <- matrix("NA",12,3)
+colnames(cond1_string) <- c("DV1", "DV2","Conditional On")
+cond1_string[seq(1,11,2),c(1,2)] <- cond1_string[seq(2,13,2),c(1,2)]  
+for(i in seq(1,11,2)){
+  cv <- names[!names %in% cond1_string[i,c(1,2)]]
+  cond1_string[i,3] <- cv[1] ; cond1_string[i+1,3] <- cv[2]
+}
+```
+
+**c)**
+```{r}
+# We also have to consider bivariate relationships conditional on both remaining variables
+# There are six of these
+cond2_string <- cbind(marginal_string,"NA", "NA")
+colnames(cond2_string)[3:4] <- c("Conditional on", "And")
+for(i in 1:6){
+  cv <- names[!names %in% cond2_string[i,c(1,2)]]
+  cond2_string[i,3] <- cv[1] ; cond2_string[i,4] <- cv[2]
+}
+ 
+```
+
+
+▸ Assume normal errors and linear relationships. This means that we can use correlations to test for marginal independence and partial correlations to test for conditional independence (use an alpha level of .05). You can use the ppcor package for this, for example. The cor.test function can be used for calculating marginal correlations and accompanying p-values; the pcor.test function when you want to condition on one variable; the pcor function tests independence between pairs of variables, given all other variables in the dataset.
+
+```{r}
+library(ppcor)
+
+# Remember that the null hypothesis for each test is that the two variables are independent.
+# Use an alpha of .05 for each test.
+# marg_p <- apply(marginal_string, 1, function(r) cor.test(data[,r[1]], data[,r[2]])$p.value)
+
+# Test Marginal Independence using
+martest1 <- cor.test(data[,"X1"], data[,"X2"])$p.value
+martest2 <- cor.test(data[,"X1"], data[,"X3"])$p.value
+martest3 <- cor.test(data[,"X1"], data[,"X4"])$p.value
+martest4 <- cor.test(data[,"X2"], data[,"X3"])$p.value
+martest5 <- cor.test(data[,"X2"], data[,"X4"])$p.value
+martest6 <- cor.test(data[,"X3"], data[,"X4"])$p.value
+p_val.mar <- data.frame(martest1, martest2, martest3, martest4, martest5, martest6)
+p_val.mar[which(p_val.mar>0.05)]
+
+
+# c1_p <- apply(cond1_string, 1, function(r) pcor.test(data[,r[1]], data[,r[2]], data[,r[3]])$p.value)
+
+# Test Conditional Independence using
+#library(ppcor)
+ctest1 <- pcor.test(data[,"X1"], data[,"X2"], data[,"X3"])$p.value
+ctest2 <- pcor.test(data[,"X1"], data[,"X2"], data[,"X4"])$p.value
+ctest3 <- pcor.test(data[,"X1"], data[,"X3"], data[,"X2"])$p.value
+ctest4 <- pcor.test(data[,"X1"], data[,"X3"], data[,"X4"])$p.value
+ctest5 <- pcor.test(data[,"X1"], data[,"X4"], data[,"X2"])$p.value
+ctest6 <- pcor.test(data[,"X1"], data[,"X4"], data[,"X3"])$p.value
+ctest7 <- pcor.test(data[,"X2"], data[,"X3"], data[,"X1"])$p.value
+ctest8 <- pcor.test(data[,"X2"], data[,"X3"], data[,"X4"])$p.value
+ctest9 <- pcor.test(data[,"X2"], data[,"X4"], data[,"X1"])$p.value
+ctest10 <- pcor.test(data[,"X2"], data[,"X4"], data[,"X3"])$p.value
+ctest11 <- pcor.test(data[,"X3"], data[,"X4"], data[,"X1"])$p.value
+ctest12 <- pcor.test(data[,"X3"], data[,"X4"], data[,"X2"])$p.value
+
+p_val.con <- data.frame(ctest1, ctest2, ctest3, ctest4, ctest5, ctest6, ctest7, ctest8, ctest9, ctest10, ctest11, ctest12)
+p_val.con[which(p_val.con>0.05)]
+
+c2test1 <- pcor.test(data[,"X1"], data[,"X2"], data[, c("X3","X4")])$p.value
+c2test2 <- pcor.test(data[,"X1"], data[,"X3"], data[, c("X2","X4")])$p.value
+c2test3 <- pcor.test(data[,"X1"], data[,"X4"], data[, c("X2","X3")])$p.value
+c2test4 <- pcor.test(data[,"X2"], data[,"X3"], data[, c("X1","X4")])$p.value
+c2test5 <- pcor.test(data[,"X2"], data[,"X4"], data[, c("X1","X3")])$p.value
+c2test6 <- pcor.test(data[,"X3"], data[,"X4"], data[, c("X1","X2")])$p.value
+
+p_val.con2 <- data.frame(c2test1, c2test2, c2test3, c2test4, c2test5, c2test6)
+p_val.con2[which(p_val.con2>0.05)]
+
+```
+
+
+▸ List all of the independencies that you find. That is, what variables are marginally or conditionally independent of one another and under what conditions?
+
+- X2 is independent of X3 given X1.  
+- X1 is independent of X4 given X2 and X3.  
+
+
+▸ Use this first principle to draw the skeleton of the DAG. Start by drawing an undirected graph where every variable is connected to every other variable. Then, remove edges between variables if they are either marginally or conditionally independent in any of the tests in the previous exercise. Tip: Use qgraph to make your undirected graph. Undirected graphs have a symmetric adjacency matrix, but you can also use the directed = FALSE option.  
+
+ - X2 and X3 are independent given X1.  
+ - X1 and X4 are independent given X2 and X3.  
+
+```{r}
+names <- c("X1","X2","X3","X4")
+
+# Adj matrix for a ''full'' undirected graph
+adj_full <- matrix(1,4,4)
+diag(adj_full) <- 0
+
+# make the layout custom (optional)
+layout = matrix(c(0,1,-1,0,1,0,0,-1),4,2,byrow = T)
+
+# Make the ``full'' graph
+qgraph(adj_full, labels=names, layout = layout, directed = FALSE, title = "Full Undirected Graph", title.cex = 1.25, vsize = 15)
+
+# Adj matrix for an undirected graph for "X2 and X3 are independent conditioning on X1"
+adj1 <- matrix(c(0,1,1,1,
+              1,0,0,1,
+              1,0,0,0,
+              1,1,0,0),4,4, byrow=TRUE)
+
+qgraph(adj1, labels=names, layout = layout, directed = FALSE, vsize = 15)
+
+adj2 <- matrix(c(0,1,1,1,
+              1,0,0,0,
+              1,0,0,1,
+              1,0,1,0),4,4, byrow=TRUE)
+
+qgraph(adj2, labels=names, layout = layout, directed = FALSE, vsize = 15)
+
+```
+
+▸ Use this second principle to give a direction to as many arrows as possible in the skeleton. What is the resulting CPDAG? Tip: With qgraph, use bidirectional = TRUE or see the help for the directed argument.  
+```{r}
+# Adj matrix for a ``full'' undirected graph
+adj_full <- matrix(1,4,4)
+diag(adj_full) <- 0
+
+# make the layout custom (optional)
+layout = matrix(c(0,1,-1,0,1,0,0,-1),4,2,byrow = T)
+
+# Make the ``full'' graph
+qgraph(adj_full, labels = names, layout = layout, directed = FALSE, title = "Full Undirected Graph", title.cex = 1.25, vsize = 15)
+
+# Remove the edges between X2 - X3 and X1- x4
+adj_full <- matrix(1,4,4)
+diag(adj_full) <- 0
+adj <- adj_full
+adj[2,3] <- adj[3,2] <- 0
+adj[1,4] <- adj[4,1] <- 0
+
+# make the layout custom (optional)
+layout = matrix(c(0,1,-1,0,1,0,0,-1),4,2,byrow = T)
+
+par(mfrow=c(1,2))
+qgraph(adj_full, labels = names, layout = layout, directed = FALSE, title = "Full Undirected Graph", title.cex = 1.25, vsize = 15)
+qgraph(adj, labels = names, layout = layout, directed = FALSE, title = "Estimated Skeleton", title.cex = 1.25, vsize = 15)
+
+```
+
+
+▸ Draw all of the DAGs that make up the estimated Markov Equivalence Class. You might find it helpful to do this with pen and paper first before transferring to qgraph.  
+```{r}
+dag1 <- matrix(c(
+   0  ,  0  ,  1  ,  0,
+   1  ,  0  ,  0  ,  1,
+   0  ,  0  ,  0  ,  1,
+   0  ,  0  ,  0  ,  0
+), 4, 4, byrow = T)
+
+dag2 <- matrix(c(
+   0  ,  1  ,  0  ,  0,
+   0  ,  0  ,  0  ,  1,
+   1  ,  0  ,  0  ,  1,
+   0  ,  0  ,  0  ,  0
+), 4, 4, byrow = T)
+
+dag3 <- matrix(c(
+   0  ,  1  ,  1  ,  0,
+   0  ,  0  ,  0  ,  1,
+   0  ,  0  ,  0  ,  1,
+   0  ,  0  ,  0  ,  0
+), 4, 4, byrow = T)
+
+par(mfrow = c(1,3))
+qgraph(dag1, labels = names, layout = layout, directed = TRUE, asize = 8, vsize = 15)
+qgraph(dag2, labels = names, layout = layout, directed = TRUE, title = "Estimated Markov Equiv. Class", title.cex = 1.25, asize = 8, vsize = 15)
+qgraph(dag3, labels = names, layout = layout, directed = TRUE, asize = 8, vsize = 15)
+```
+
+
+▸ Imagine that we are interested in the causal effect of X1 on X4. Use linear regression to estimate the effect from the observational data, using each of the DAGs in the Markov Equivalence class in turn to derive how this should be done (Assume the effects are linear). What do the different DAGs and your accompanying estimates of the causal effects imply?  
+```{r}
+lm(X4 ~ X1 , data= as.data.frame(data))
+```
+
+
+
+### 7.2 Intro PC algorithm
+```{r, message=FALSE}
+library("pcalg")
+library("Rgraphviz")
+
+suffStat <- list(C = cor(data), n = nrow(data))
+pc_fit1 <- pc(suffStat = suffStat, indepTest = gaussCItest,
+p = ncol(data), alpha = 0.01)
+
+# This is the default plotting method for pcalg - uses Rgraphviz
+plot(pc_fit1, main = "Inferred CPDAG using pcalg")
+
+# You can also extract the adjacency matrix and plot using qgraph
+# Note that you have to transpose the matrix; pcalg writes matrices from column to row
+cpdag_mat <- as(pc_fit1,"matrix")
+qgraph(t(cpdag_mat), labels = names, layout = layout, directed = TRUE, title = "Estimated CPDAG", title.cex = 1.25, asize = 8)  
+
+```
+
+```{r}
+# Extract the adjacency matrix of the cpdag from pc_fit1
+cpdag_mat <- as(pc_fit1,"matrix")
+
+# Each row is a DAG adjacency matrix in vector form (by rows)
+res1 <- pdag2allDags(cpdag_mat)
+
+# We can get the adjacency matrix of an individual DAG using
+res1_dags <- list()
+for(i in 1:nrow(res1$dags)){
+  res1_dags[[i]] <- t(matrix(res1$dags[i,],4,4,byrow = TRUE))
+}
+# Notice we have to transpose the adjacency matrix here for qgraph!
+
+# We can plot each of these just as we did above
+par(mfrow = c(1,3))
+for(i in 1:3){
+  qgraph(res1_dags[[i]], labels = names, layout = layout, directed = TRUE, asize = 8, vsize = 15)
+}
+
+# Estimate the effect of an intervention according to each of the DAGs in the Markov Equivalence set
+ida(1,4,cov(data), pc_fit1@graph, verbose = TRUE)
+```
+
+
+### 7.3 PC algorithm in action
+```{r}
+### TRUE DAG
+names <- LETTERS[1:4]
+adjmat2 <- matrix(c(0, 0, 1, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 0,
+                    0, 1, 1, 0), 4, 4, byrow = T)
+lay2 <- matrix(c(-1, 1,
+                 .5, 1,
+                 0, 0,
+                 1, 0), 4, 2, byrow = T)
+
+qgraph(adjmat2, labels = names, layout = lay2, directed = TRUE, asize = 8, vsize =15)
+
+### plot a CPDAG
+g2 <- as(adjmat2, "graphNEL")
+cpdag2 <- dag2cpdag(g2)
+plot(cpdag2)
+```
+
+▸ What do you expect the PC algorithm to be able to recover? What is the CPDAG for this DAG?
+Suppose that we have the following data, generated according to the above DAG
+```{r}
+set.seed(1234)
+n <- 3000
+
+A <- rnorm(n)
+D <- rnorm(n)
+B <- 0.50 * D + rnorm(n)
+C <- -0.75 * A + B + D +  rnorm(n)
+
+data2 <- cbind(A, B, C, D)
+```
+
+▸ Use the pcalg package to estimate the CPDAG. Do you obtain the correct CPDAG?  
+
+```{r}
+suffStat2 <- list(C = cor(data2), n = nrow(data2))
+pc_fit2 <- pc(suffStat = suffStat2, indepTest = gaussCItest,
+p = ncol(data2), alpha = 0.01)
+
+# This is the default plotting method for pcalg - uses Rgraphviz
+plot(pc_fit2, main = "Inferred CPDAG using pcalg")
+```
+
+▸ Estimate the causal effect of A on C
+```{r}
+ida(1,3,cov(data2), pc_fit2@graph, verbose = TRUE)
+```
+
+▸ Estimate the effect on D on C
+```{r}
+ida(4,3, cov(data2), pc_fit2@graph, verbose=TRUE)
+```
+
+## Bonus: Generating/Simulating Data from a SCM II
+▸ Start by specifying the model equations for your SCM. Pick distributions for X and Y to generate the type of variable of your choice. Specify some form of regression model for Z, such that Z depends on X and Y. For example, if Z is to be binary, consider specifying a logistic regression model for Z. If Z is to be continuous, you could consider a normal linear regression model to generate Z, for example. Note that if you use non-linear relationships, the size of the causal effect on your outcome variable will differ depending on the size of the score of your predictor variable (e.g., changing from X=0 to X=1 will not necessarily have the same effect on Y as changing from X=1 to X=2)!
+
+
+
+▸ Next, simulate data from your SCM. Generate 2000 observations of X and Y, such that they are independent from one another. To do this, you need a function to sample values for X and Y from the probability distribution you specified in your SCM equations. You can use function rbinom to sample values for bernoulli (dichotomous) variables and rnorm to sample values for normally distributed variables. 
+
+```{r}
+# First, set a random seed so we can reproduce our results
+set.seed(45)
+# Pick a large sample size
+n <- 2000
+
+# For example, you could use two normal distributions to generate X and Y
+
+X <- rnorm(n, mean = 0, sd = 1)
+Y <- rnorm(n, mean =0, sd = 1)
+
+#In the above we have created data for 2000 people. Both the X and Y variables have a mean of 0 and standard deviation of 1, and the two variables are unrelated.
+```
+
+▸ Now, generate Z based on your specified regression model and the predictors your generated.
+
+```{r}
+#Example for three normal variables X Y Z,
+# where Z is a linear function of X and Y with normally distributed residuals.
+# I chose regression coefficients equal to 1 for X and 2 for Y
+# I chose a residual standard deviation of 0.2.
+Z <- 1*X + 2*Y + rnorm(n, mean = 0, sd = .2)
+# I could also have specified this like so
+# Z <- rnorm(n, mean = 1*X + 2*Y, sd = .2 )
+
+# Example where X and Y are normal, but Z is a dichotomous variable.
+# First, I specific the linear function for the log-odds of Z as a function of X and Y:
+l <- 3*X + 4*Y #I chose logistic regression coefficients equal to 3 and 4 respectively. 
+# Now we transform the generated log-odds to probabilities using a standard logistic regression equation
+p_z <- 1/(1+ exp(-1*l)) 
+# Now we want to sample binary values for Z based on these probabilities so we obtain our dichotomous variable. We do this by drawing 0/1 values from from a binomial/bernoulli distribution based on the probabilities:
+Z_binom <- sapply(p_z,function(vec) rbinom(1,1,prob = vec))
+```
+
+
+▸ Now, estimate and/or visualize the dependency between X and Y while ignoring Z (i.e. compute their marginal dependency).
+```{r}
+# A simple descriptive such as a correlation could do
+cor(X,Y)
+
+# Or we can use linear regression
+summary(lm(Y~X))$coefficients
+coef1 <- lm(Y~X)$coefficients
+
+# We can visualize this like this, for example:
+plot(X, Y, main = "Marginal relatioship X and Y", xlim = c(-4,4), ylim = c(-4,4))
+abline(a = coef1[1], b = coef1[2], col = "black")
+```
+
+
+▸ Finally, estimate and/or visualize the conditional dependency between X and Y given Z. Think about the different ways in which you can condition on a variable! For instance, you can try to control for Z statistically (as in a regression model), or select data points based on their Z value. What do you see in comparison to the previous step? Can you explain the results?
+
+```{r}
+# There are many ways to condition on Z. 
+
+### For the example with a continuous Z with normal residuals:###
+# Conditioning with regression:
+summary(lm(Y ~ X + Z))$coefficients
+
+# We can also, for instance, condition on Z by selecting only the people with specific values for Z
+#  # We can also, for instance, select only high values of Z.
+sel <- Z > 0
+ # If we "unknowingly" select only high Z individuals, we get a negative dependency between X and Y
+summary(lm(Y[sel] ~ X[sel]))$coefficients
+coef2 <- lm(Y[sel] ~ X[sel])$coefficients
+ # The same applies here if we select only low Z individuals, we get a negative dependency between X and Y
+summary(lm(Y[!sel] ~ X[!sel]))$coefficients
+coef3 <- lm(Y[!sel] ~ X[!sel])$coefficients
+
+
+#lets visualize this, to clarify what is happening.
+plot(X[!sel], Y[!sel],
+    main = "Relationship X and Y conditional on Z", xlim = c(-4,4), ylim = c(-4,4),
+    col = "blue", xlab = "X", ylab = "Y")
+points(X[sel], Y[sel], col = "red")
+
+abline(a = coef2[1], b = coef2[2], col = "red") #regression line only high Z
+abline(a = coef3[1], b = coef3[2], col = "blue") #regression line only low Z
+abline(a = coef1[1], b = coef1[2], col = "black") #regression line any Z
+
+##For the example with dichotomous Z##
+# Regression coefficient here is positive
+summary(lm(Y ~ X + Z_binom))$coefficients
+
+# Another way to condition on Z is to select only high Z individuals
+sel <- (Z_binom == 1)
+# Now let's run a regresion with Y predicted by X, but in the "subpopulation" of high Z people
+summary(lm(Y[sel] ~ X[sel]))$coefficients
+ coef4 <- lm(Y[sel] ~ X[sel])$coefficients
+
+ summary(lm(Y[!sel] ~ X[!sel]))$coefficients
+ coef5 <- lm(Y[!sel] ~ X[!sel])$coefficients
+
+ plot(X[!sel], Y[!sel],
+     main = "Relationship X and Y conditional on Z", xlim = c(-4,4), ylim = c(-4,4),
+     col = "blue", xlab = "X", ylab = "Y")
+ points(X[sel], Y[sel], col = "red")
+
+ abline(a = coef4[1], b = coef4[2], col = "red") #regression line for Z=1 group
+ abline(a = coef5[1], b = coef5[2], col = "blue") #regression line for Z=0 group
+ abline(a = coef1[1], b = coef1[2], col = "black") #regression line for all Z
+```
+

@@ -1,0 +1,1037 @@
+---
+title: "CI_Ex3_KP"
+author: "Kyuri Park"
+date: "3/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(qgraph)
+library(dagitty)
+library(ggdag)
+library(dplyr)
+```
+
+# 1. Simpsons Paradox, Berksons Paradox, Selection Bias
+In the following exercises you will practice recognizing/analyzing/visualizing variables in the context of Simpsons Paradox and Berksons Paradox (Berksons Bias). All of the data were simulated.
+
+▸ Load the data.
+```{r}
+load('dataEx1Lab3.Rdata')
+```
+
+## 1.1 Observational Data 1 - “High IQ Makes Students Lazy!?!”
+Researchers have measured three variables for university students: Their study success after three bachelor years (higher scores indicate more success), study hours (amount of hours put into study per week on average), and their IQ scores.  
+
+They want to ***evaluate if the IQ score of students affects how many of hours they study on average per week.  
+
+▸ Based on the description above, what do you believe is the most reasonable causal model (DAG) for these data? 
+
+```{r}
+varnames <- c("IQ","studysuccess","studyhours")
+Adj <- matrix(c(0,1,1,
+                0,0,0,
+                0,1,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj, 
+       #you can provide a custom layout by giving the x-y co-ordinates of each node
+       layout = rbind(c(-1,-1),
+                      c(0,1),
+                      c(1,-1)))
+```
+
+
+▸ Take a look at the dataframe study_succes_data. In the following analyses, use hours of study as your dependent variable.  
+DV = studyhours
+
+### 1.1.1 Simpsons Paradox
+▸ Use linear regression to evaluate marginal association between hours of study and IQ scores. 
+ 
+```{r}
+studyh_marg <- lm(studyhours ~ IQ, data=study_succes_data)
+summary(studyh_marg)
+
+# why would correlation coefficient differ from the reg. coefficient? --> it needs to be standardized.
+cor(study_succes_data$studyhours, study_succes_data$IQ)
+```
+
+▸ How can the regression coefficient you obtain be interpreted? What would your conclusion be if you interpreted these results in a causal manner? 
+
+People with one IQ point higher are expected to have 0.007 less study hours, but the effect is not significant. Therefore we'd conclude that we have no evidence that indicates IQ is a cause of study hours.
+
+
+▸ Use linear regression to evaluate the association between hours of study and IQ scores, conditional on study success.  
+```{r}
+studyh_cond <- lm(studyhours ~ IQ + studysucces, data=study_succes_data)
+summary(studyh_cond)
+```
+
+▸ How can the regression coefficient you obtain be interpreted? What would your conclusion be if you interpreted these results in a causal manner?  
+ The association between study hours and IQ becomes larger, -0.1.    
+ In causal interpretation, I'd say the IQ causes the study hours to be less by -0.1, meaning higher IQ leads to less study hours.    
+ 
+
+▸ How do you explain the results of the above two analyses? Given your initial DAG and the results of the analyses, what do you think is the most reasonable conclusion?
+
+***Take home message 1: the marginal relationship and conditional relationship are different.***  
+Given that study success is a collider, we should not condition on study success.  
+Hence, the marginal relationship is correct: IQ and study hours are marginally independent.  
+The conculsion is there is no evidence for a causal effect of IQ on the amount of study hours on average per week.
+
+### 1.1.2 Berksons Bias
+Imagine a research team collecting the same data - but instead of the population of students as a whole they focused on students that are in the running for ‘honors’ or even a ‘cum laude’ diploma. These are students that have a higher study success than 95. They only directly measured IQ scores and the average hours of study per week.  
+
+▸ Select a sample from the original dataset with only students in the running for a honors or cum laude diploma.  
+```{r}
+# check the data
+summary(study_succes_data)
+hist(study_succes_data$studysucces)
+abline(v=95, col="red")
+
+# select high achievers
+sel <- study_succes_data$studysucces>95
+honors_data <- study_succes_data[which(sel),]
+```
+
+▸ Use linear regression to evaluate the association between hours of study and IQ scores. Interpret the results, and compare them to the previous two analyses.  
+This is not a marginal relationship but conditional !! Because we condition on study success by selecting honors students. 
+IQ and studyhours are conditionally dependent. With one point higher on IQ, people are expected to have approximately 0.07 less study hours per week, ***given that the study success is higher than 95***. 
+ 
+```{r}
+# honors data
+studyh_honors <- lm(studyhours ~ IQ, data=honors_data)
+summary(studyh_honors)
+```
+
+### 1.1.3 Visualize
+▸ Make a scatterplot in which you visualize the marginal relationship between hours of study and IQ scores, for the whole student population (e.g., not conditioning on study success in any way).  
+
+▸ Make another scatterplot in which you visualize the relationship between hours of study and IQ scores, for the potential cum laude students. (or add this to the previous scatterplot)  
+
+```{r}
+# plot(studyhours~IQ, data=study_succes_data)
+# points(studyhours[sel]~IQ[sel], col="red", data=study_succes_data)
+
+# marginal relationship in the whole student population
+plot(study_succes_data$IQ, study_succes_data$studyhours, main = "Relatioship IQ and Study Success", ylab="Study Succes", xlab="IQ", pch=19, col="grey15")
+abline(a = studyh_marg$coefficients[1] , b = studyh_marg$coefficients[2], col = "black",lwd=3)
+
+# conditional relationship in the honors student
+points(honors_data$IQ, honors_data$studyhours, pch=8,col="blue",cex=1.2)
+abline(a = studyh_honors$coefficients[1] , b = studyh_honors$coefficients[2], col = "blue", lwd=2)
+```
+
+```{r}
+library(ggplot2)
+library(viridis)
+# Gradient color
+ggplot(study_succes_data, aes(x = IQ, y = studyhours, colour = studysucces)) +
+  geom_point()+
+  scale_color_viridis(option = "D")
+```
+
+### 1.1.4 The true average causal effect
+The data was simulated in the following way:
+```{r}
+set.seed(113221701) # set the seed for comparison
+n <- 600          # total sample size
+IQ <- rnorm(n,115,7)
+studyhours<- rnorm(n,30,5)
+studysucces<- 25 + .25*IQ + 1.25*studyhours + rnorm(n,0,5)
+```
+
+▸ What is the true average causal effect? Calculate this by mimicking an intervention: Determine the expected value of the dependent variable while you fix the cause variable to zero, and determine the expected value of the dependent variable while you fix the cause variable to one. Then calculate the ACE.  
+We see that there is no causal effect AT ALL of IQ on study hours based on the true DAG.
+
+```{r}
+# cause variable (IQ) set to 1
+IQ <- 1
+EVstudyhours_IQ1 <- 30 
+EVstudysucces <- 25 + .25*IQ + 1.25*EVstudyhours_IQ1
+
+# cause variable (IQ) set to 1
+IQ <- 0
+EVstudyhours_IQ0<- 30
+EVstudysucces_IQ0 <- 25 + .25*IQ + 1.25*EVstudyhours_IQ0 
+
+# dependent variable (study hours)!!
+EVstudyhours_IQ1-EVstudyhours_IQ0
+```
+
+## 1.2 Observational Data 2 - “Does Size Matter?”
+In this exercise we loosely mimick a classic (real research) example of simpsons paradox, where two treatments (cause variables of interest) for kidney stones were evaluated. The outcome variable of interest is a measurement recovery/health/wellbeing, and a potential covariate to consider is kidney stone size. It is observational data: People come in with kidney stone problems, and are assigned treatment. After treatment, their wellbeing is measured.  
+
+▸ Based on the description above, what do you believe is the most reasonable causal model (DAG) for these data?  
+```{r}
+# confounding situation: kidney stone size affects both the treatment and wellbeing
+varnames <- c("treatment","stonesize","wellbeing")
+Adj <- matrix(c(0,0,1,
+                1,0,1,
+                0,0,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj, 
+       #you can provide a custom layout by giving the x-y co-ordinates of each node
+       layout = rbind(c(-1,-1),
+                      c(0,1),
+                      c(1,-1)))
+```
+
+
+▸ Take a look at the dataframe kidneystone_data.
+
+### 1.2.1 Simpsons Paradox or Berksons Bias
+▸ Use linear regression to uncover either an example of Simpsons Paradox or Berksons Bias (your choice). Discuss the results.  
+
+```{r}
+## Simpsons paradox
+# marginal relationship
+wellb_marg <- lm(wellbeing ~ treatment , data=kidneystone_data)
+summary(wellb_marg)
+```
+
+```{r}
+# conditional relationship
+wellb_cond <- lm(wellbeing ~ treatment + stonesize , data=kidneystone_data)
+summary(wellb_cond)
+```
+ - Marginal relationship: treatment drcreases the wellbeing by 4.4, while in the condtional relationship treatment increases the wellbeing by 1.8. --> ***Marginal and conditional relationship are different, in fact opposite ***  
+
+
+```{r}
+## Berksons paradox: in the example below, we select for people that have kidneystones larger than 8 mm (but you may select in different ways, of course, and this may alter the results).
+
+hist(kidneystone_data$stonesize)
+abline(v=8, col="red", lwd=3)
+```
+
+```{r}
+# select people whose stone size is larger than 8mm
+larges_data = kidneystone_data[which(kidneystone_data$stonesize>8),]
+
+wellb_larges <- lm(wellbeing~treatment,data=larges_data)
+summary(wellb_larges)
+```
+ - When we condition on stone size by selecting people with large stone, we see a negative effect of treatment on wellbeing but a much weaker one than the one we found in the marginal relationship (-4.4). 
+ Based on our true DAG, stone size is a confounder, which should be controlled for. So in this case, the conditional relationship is the most appropriate. Accordingly we conclude that treatment causes higher wellbeing.
+
+### 1.2.2 Visualize
+▸ Use scatterplots to illustrate the Paradox.  
+By selecting people with the large stones, we see the regression coefficient of treatment becomes larger (less negative).  
+
+***In the second scatterplot, we see that small stonesizes only appear in the treatment 0, while there are relatively large stonesizes in the treatment 1.***
+```{r}
+plot(kidneystone_data$wellbeing ~ kidneystone_data$treatment)
+abline(a = wellb_marg$coefficients[1], b = wellb_marg$coefficients[2])
+
+points(larges_data$wellbeing ~ larges_data$treatment, col="blue")
+abline(a = wellb_larges$coefficients[1], b = wellb_larges$coefficients[2] , col="blue")
+```
+
+
+```{r}
+#Optional, to visualize the effect of conditioning on stone size in more of a continuous fashion
+library(ggplot2)
+library(viridis)
+# Gradient color
+ggplot(kidneystone_data, aes(x = treatment, y = wellbeing, colour = stonesize)) +
+  geom_point()+
+  scale_color_viridis(option = "C")
+```
+
+### 1.2.3 The true average causal effect
+The data was simulated in the following way:
+```{r}
+# set the seed for comparison
+set.seed(133222032) 
+n <- 500          # total sample size
+stonesize <- rnorm(n,8,2) # average stone size of 8 mm 
+treatment = rep(0,n)
+treatment[which(stonesize>9)] <- 1  #Treatment is assigned deterministically (no probability involved here) completely based on stone size. People with large stones (>9) get treatment '1'.
+wellbeing <- 30 + 2*treatment - 2*stonesize + rnorm(n,0,1) 
+```
+
+▸ Calculate the true causal effect by mimicking an intervention. Discuss the results.  
+Note that in the simulated data, treatment is deterministically determined by the stone size -- people with stone size larger than 9 get treatment 1. This means that people with poor wellbeing outcomes will tend to get treatment 1, while treatment 1 actually produces better wellbeing in general. 
+```{r}
+# fix the causal variable to 1: Treatment = 1
+stonesize_EV <- 8 # averge stone size of 8 mm 
+treatment=1 
+wellbeing_t1_EV <- 30 + 2*treatment - 2*stonesize_EV
+
+# fix the causal variable to 0:Treatment = 0
+stonesize_EV <- 8 # averge stone size of 8 mm 
+treatment=0
+wellbeing_t0_EV <- 30 + 2*treatment - 2*stonesize_EV
+
+# difference in the expected value of DV (well-being)
+wellbeing_t1_EV-wellbeing_t0_EV
+```
+
+
+
+## 1.3 Observational Data 3 - “Does length matter?”
+In this exercise consider a (simulated) study on the amount of pollen flowers receive (outcome of interest) from pollinators, given their sepal length (potential cause of interest) and a general measure of bloom attractiveness (third variable). It is observational data.  
+
+▸ Based on the description above, what do you believe is the most reasonable causal model (DAG) for these data?
+```{r}
+# collider situation (?)
+varnames <- c("sepal.length","bloomattract","pollen")
+Adj <- matrix(c(0,1,1,
+                0,0,1,
+                0,0,0), 3,3, byrow = TRUE,
+              dimnames = list(varnames,varnames))
+qgraph(Adj, 
+       #you can provide a custom layout by giving the x-y co-ordinates of each node
+       layout = rbind(c(-1,-1),
+                      c(0,1),
+                      c(1,-1)))
+```
+
+▸ Take a look at the dataframe pollen_data.
+
+### 1.3.1 Simpsons Paradox or Berksons Bias
+▸ Use linear regression to uncover either an example of Simpsons Paradox or Berksons Bias (your choice). Discuss the results.    
+
+- Simpsons Paradox  
+Marginally, the sepal length has a significantly positive effect on the amount of pollen, meaning that flowers with longer sepal are expected to receive a higher amount of pollen.  
+Conditionally, the effect of sepal length is still significantly positive but the effect size is decreased to 0.007.  
+--> ***marginal relationship and conditional relationship are different***.
+
+- Berksons Bias  
+When we condition on attractiveness by selecting flowers with high attractiveness, the effect of sepal length us 0.056, which is between the ones seen in the marginal and conditional relationship.
+
+- Conclusion: based on the true DAG, attractiveness is a mediator so we do not control for it, unless we are interested only in the direct effect.
+Here the estimated total effect is 0.11 and the direct effect is 0.007, which indicates that the direct is smaler than the indirect effect (indirect effect = total - direct).
+
+```{r}
+pollen_marg <- lm(pollen ~ sepal_length, data = pollen_data)
+summary(pollen_marg)
+```
+
+```{r}
+pollen_cond <- lm(pollen~sepal_length + bloom_attract, data=pollen_data)
+summary(pollen_cond)
+```
+
+
+```{r}
+#Berksons. In the example below, we select for flowers that have bloom attractiveness higher than 50 (but you may select in different ways, of course, and this may alter the results).
+
+quantile(pollen_data$bloom_attract, probs = seq(0, 1, 0.1), na.rm = FALSE,
+         names = TRUE, type = 7)
+
+
+hist(pollen_data$bloom_attract)
+abline(v=50, col="red", lwd=3)
+```
+
+```{r}
+highatt_data = pollen_data[which(pollen_data$bloom_attract>50),]
+
+pollen_highatt <- lm(pollen~sepal_length,data=highatt_data)
+summary(pollen_highatt)
+```
+
+
+### 1.3.2 Visualize
+▸ Use scatterplots to illustrate the Paradox.  
+```{r}
+plot(pollen_data$sepal_length, pollen_data$pollen, main = "Relationship sepal_length and pollen", ylab="pollen", xlab="sepal_length", pch=19, col="grey15")
+abline(a = pollen_marg$coefficients[1] , b = pollen_marg$coefficients[2], col = "black",lwd=3)
+
+points(highatt_data$sepal_length, highatt_data$pollen, pch=8,col="blue",cex=1.2)
+abline(a = pollen_highatt$coefficients[1] , b = pollen_highatt$coefficients[2], col = "blue", lwd=2)
+```
+
+```{r}
+#Optional, to visualize the effect of conditioning on bloom attract in more of a continuous fashion
+library(ggplot2)
+library(viridis)
+# Gradient color
+ggplot(pollen_data, aes(x = sepal_length, y = pollen, colour = bloom_attract)) +
+  geom_point()+
+  scale_color_viridis(option = "D")
+```
+
+
+### 1.3.3 The true average causal effect
+The data was simulated in the following way:
+```{r}
+set.seed(133222058) # set the seed for comparison
+n <- 500          # total sample size
+sepal_length <- rnorm(n,5,1)
+bloom_attract= 25 + 5*sepal_length + rnorm(n,0,5)
+pollen <- 0 + .02*bloom_attract + .01*sepal_length + rnorm(n,0,.05)
+```
+
+
+▸ Calculate the true causal effect by mimicking an intervention. Discuss the results.  
+```{r}
+###cause variable: sepal_length = 1
+sepal_length <- 1
+bloom_attract_EV_sl1 <- 25 + 5*sepal_length 
+pollen_EV_sl1 <- 0 + .02*bloom_attract_EV_sl1 + .01*sepal_length 
+
+###cause variable: sepal_length = 0
+sepal_length <- 0
+bloom_attract_EV_sl0 <- 25 + 5*sepal_length 
+pollen_EV_sl0 <- 0 + .02*bloom_attract_EV_sl0 + .01*sepal_length 
+
+### difference in the expected value of DV: pollen
+pollen_EV_sl1 - pollen_EV_sl0
+```
+
+# 2. Controlling for Pretests, ANCOVA, Change Scores
+This exercise will help you to better understanding of the effects of controlling for pre-tests and the relation between ANCOVA approaches and Change-score approaches. In this exercise you will practice with different scenarios (or data generating mechanisms) that give rise to data in which there is an outcome variable Y2, a (binary) treatment variable X, and a covariate Y1 that is a previous measurement of the same variable as the outcome variable.
+
+The scenarios under which we generate data are:  
+
+ - a randomized controlled trial (RCT), in which treatment assignment X is independent of pretest Y1
+ - a scenario in which treatment groups X already existed prior to the pretest Y1, such that the pretest is a mediator
+ - a scenario in which treatment assignment X is entirely based on the pretest score Y1, such that the pretest is a confounder
+ - a scenario in which treatment assignment X is partly based on the pretest score Y1, such that the pretest is a confounder
+
+In each scenario, the data for the outcome variables Y2 are simulated using the regression model: $Y_{2i}=\beta_0 + \beta_1X_i+\beta_2Y_{1i}+e_i$. The key difference between these scenarios is in ***how and why treatment X and pretest Y1 are related***.  
+
+For each dataset, you will then estimate four models:  
+
+ - an ANCOVA model with the posttest score Y2 as the outcome: $Y_{2i}=\beta_0 + \beta_1X_i+\beta_2Y_{1i}+e_i$
+
+ - an ANCOVA model with the gain score $G=Y2-Y1$ as the outcome (in other words, a change score model where we control for pre-test): $Y_{2i}−Y_{1i}=\beta_0+\beta_1X_i+(\beta_2−1)Y_{1i}+e_i$
+
+ - a change score model with only X as a predictor: $Y_{2i}−Y_{1i}=\gamma_0+\gamma_1X_i+e_i$
+
+ - a marginal model in which $Y1$ is not included: $Y_{2i}=\phi_0+\phi_1X_i+e_i$
+
+
+## 2.1 RCT
+
+We begin with simulating data according to an RCT. This implies that treatment X and pretest Y1 are independent of each other, while the posttest Y2 may depend on both.
+
+The DAG for this model looks like this:
+
+### 2.1.1 Simulate data
+We first need to simulate X (treatment) and Y1 (pretest). Note that in an RCT these will be unrelated (as is also clear from the DAG).
+
+▸ Use the following code to simulate the data of an RCT.
+```{r}
+set.seed(482) # set the seed for comparison
+
+N <- 500          # total sample size
+
+# For Y1
+mY1 <- 115    # mean on pretest
+sdY1 <- 20    # sd on pretest
+Y1 <- rnorm(N,mY1,sdY1)   # simulate Y1
+
+# For X
+X <- rbinom(N,1,0.5)      # simulate treatment 
+
+# For Y2
+b0 <- 70          # intercept
+b1 <- 20          # causal effect       
+b2 <- .4          # covariate effect
+sdE2 <- 5         # within-group residual sd
+Y2 <- b0 + b1*X + b2*Y1 + rnorm(N,0,sdE2)
+
+dat1 <- data.frame(Y1,Y2,X)
+```
+
+
+▸ Consider the correlations between Y1, Y2, and X; what can you say about these?
+```{r}
+round(cor(dat1),3)
+```
+
+
+### 2.1.2 Plot the data
+Now we will make plots of the data like the ones used in the lecture (and the literature).  
+
+▸ First create a scatter plot with Y1 on the x-axis and Y2 on the y-axis, and with separate colors for the two treatment groups. Indicate for all the parameters defined above (mY1, sdY1, b0, b1, b2, sdE2) what feature in the plot they represent.  
+
+```{r}
+# For plotting it may be useful to find the overall minimum 
+# and maximum across the pretest and posttest, to make the two
+# axes comparable
+minY <- min(c(Y1,Y2))
+maxY <- max(c(Y1,Y2))
+
+plot(x=dat1$Y1, y=dat1$Y2, col = (dat1$X+1),
+        xlim=c(minY,maxY), ylim=c(minY,maxY),
+        xlab="Y1", ylab="Y2")
+```
+
+
+▸ Which part of this plot is reflecting the causal effect from the ANCOVA model?  
+The distance between those two parallel lines.  
+
+▸ Second, make a plot of the means of the pretest scores and post test scores of each group. In the plot, place the two time points on the x-axis and the means of the two groups separately at each time point on the y-axis. Connect the means that belong to the same group using a line plot, and use different colors for each group.  
+
+```{r}
+# Means of:
+# - pretest non-treatment group (mY10)
+# - pretest treatment group (mY11)
+# Note that both should be  about mY1=115 (value used in simulation)
+mY10 <- mean(Y1[X==0]) 
+mY11 <- mean(Y1[X==1]) 
+
+# Means of:
+# - posttest non-treatement group (mY20)
+# - posttest treatment group (mY21)
+# Note that the first should be about:
+# mY20 = b0 + b2*mY10 = 70 + 0.4*115 = 116
+# and the second should be about:
+# mY21 = b0 + b1 + b2*mY11 = 70 + 20 + 0.4*115 = 136
+mY20 <- mean(Y2[X==0]) 
+mY21 <- mean(Y2[X==1]) 
+
+# Gather means on both occasions per treatment condition
+mYX0 <- c(mY10,mY20)
+mYX1 <- c(mY11,mY21)
+
+minY <- min(mYX0,mYX1)
+maxY <- max(mYX0,mYX1)
+
+plot(c(1,2), mYX0, type="l", 
+            xlim = c(0.7, 2.3),
+            ylim = c(minY-5, maxY+5), xaxt="n",
+            xlab="time",
+            ylab="Y")
+points(c(1,2),mYX0,pch=19,cex=1.3)
+lines(c(1,2), mYX1, col="red")
+points(c(1,2),mYX1,pch=19,cex=1.3,col="red")
+
+axis(side=1, at=seq(1, 2, by=1))
+```
+
+▸ How can this plot be used to determine whether in a change score model we would find evidence for a causal effect?  
+The causal effect in the change score plot is the different distance between the two lines at time1 and time2 (difference - in - differences).  
+
+### 2.1.3 Analyze the data
+Next, we analyze the data using the four models.  
+
+▸ First, estimate an ANCOVA (e.g., using the function lm()), with Y2 as the outcome, X as the grouping variable, and Y1 as the covariate (that is: X and Y1 are both predictors in your regression). Report the parameter (estimate, test, p-value) that is relevant for the causality question.
+
+```{r}
+ANCOVA <- lm(Y2 ~ X + Y1, data=dat1)
+summary(ANCOVA)
+```
+
+
+▸ Second, estimate an ANCOVA with the gain score (i.e., Y2-Y1) as the outcome variable, X as the grouping variable and Y1 as the covariate (that is: X and Y1 as predictors). Compare the results regarding the estimated causal effect of X from this model to those obtained above.
+
+```{r}
+ANCOVA <- lm((Y2-Y1) ~ X + Y1, data=dat1)
+summary(ANCOVA)
+```
+
+▸  Third, estimate the change score model, by regressing the gain score (i.e., Y2-Y1) on X; note this is a regression model with the gain score as the outcome, and only treatment X as its predictor (it may also be recognized by some as an ANOVA on the gain score). Report the parameter (estimate, test, p-value) that is relevant for the causality question.
+
+```{r}
+CSA <- lm((Y2-Y1) ~ X, data=dat1)
+summary(CSA)
+```
+
+
+▸  Fourth, estimate the marginal model in which Y2 is regressed on X (hence, Y1 is not included in any way). Report the parameter (estimate, test, p-value) that is relevant for the causal question.
+
+```{r}
+Y2onX <- lm((Y2) ~ X, data=dat1)
+summary(Y2onX)
+```
+
+### 2.1.4 Conclusion
+▸  When comparing the results, what is your conclusion about the causal effect of treatment on the outcome?  
+
+First, we see that doing an ANCOVA with the post-test (Y2) and an ANCOVA with the gain score (Y2-Y1) as the outcome both lead to the exact same estimate of the causal effect. This is in agreement with the expressions for the ANCOVA model that we found in the lecture.  
+
+Second, the other two approaches (change score analysis, and marginal model), lead to slightly different estimates (from the ANCOVA and each other). But the ***substantive conclusions are all the same. This is because Y1 and X are unrelated*** (as would be the case in an ***RCT*** due to random assignment).  
+
+
+## 2.2 Existing treatment groups
+A second scenario that we consider, is when there are pre-existing treatment groups. One possible example of such a scenario is the one described by Lord, where the groups were male versus female students.  
+
+The DAG that represents such a scenario looks like this:  
+2.2.1 Simulate data
+Again, to simulate Y2, we make use of the regression model: Y2i=b0+b1Xi+b2Y1i+e2i.
+
+However, Y1 is now simulated in a different way: Its values will depend on X.
+
+▸ Simulate the data using the code below.
+
+```{r}
+set.seed(268) # set the seed for comparison
+
+N <- 500          # total sample size
+
+# For X:
+X <- rbinom(N, 1, 0.5)  # simulate treatment
+
+# For Y1:
+mY10.true <- 100      # mean of non-treatment group at pretest
+mY11.true <- 130      # mean of treatment group at pretest
+sdY1 <- 15            # within-group sd at pretest (both groups)
+
+# Note that when X=1, the first part will be zero; if X=0, the second
+# part is zero; so this ensures that for each individual only one part
+# remains when simulating Y1:
+Y1 <- (1-X)*rnorm(N, mY10.true, sdY1) + X*rnorm(N, mY11.true, sdY1)
+
+# As a result, the two groups now have different means (mY10, mY11) on the pretest.
+
+# For Y2:
+b0 <- 70          # intercept
+b1 <- 20          # causal effect       
+b2 <- .4          # covariate effect
+sdE2 <- 5         # within-group residual sd
+
+Y2 <- b0 + b1*X + b2*Y1 + rnorm(N,0,sdE2)
+
+dat2 <- data.frame(Y1,Y2,X)
+```
+
+▸ Look at the correlations between X, Y1 and Y2; what can you say about these?  
+
+```{r}
+round(cor(dat2),3)
+```
+
+### 2.2.2 Plot the data
+We will consider the same two kind of plots (scatterplot with regression lines, and plot of group means at both measurement occasions).  
+
+▸ First, plot the post-test Y2 against the pre-test Y1. Use different colors for the two groups. What part of this plot informs you on whether there is evidence for a causal effect when using the ANCOVA model?
+
+```{r}
+minY <- min(c(Y1,Y2))
+maxY <- max(c(Y1,Y2))
+
+plot(x=dat2$Y1, y=dat2$Y2, col = (dat2$X+1),
+    xlim=c(minY,maxY),ylim=c(minY,maxY),
+    xlab="Y1", ylab="Y2")
+```
+
+▸  Second, make a plot in which you have the two time points on the x-axis and the means of the two groups separately (i.e., the plot related to the changes score approach). How can this plot be used to determine whether a change score analysis would provide evidence for a causal effect?
+
+
+```{r}
+# Means of:
+# - pretest non-treatment group (mY01)
+# - pretest treatment group (mY11)
+mY10 <- mean(Y1[X==0]) 
+mY11 <- mean(Y1[X==1]) 
+
+# Means of:
+# - posttest non-treatement group (mY20)
+# - posttest treatment group (mY21)
+mY20 <- mean(Y2[X==0]) 
+mY21 <- mean(Y2[X==1]) 
+
+# Gather means on both occasions per treatment condition
+mYX0 <- c(mY10,mY20)
+mYX1 <- c(mY11,mY21)
+
+minY <- min(mYX0,mYX1)
+maxY <- max(mYX0,mYX1)
+
+plot(c(1,2), mYX0, type="l", 
+            xlim=c(0.7,2.3),
+            ylim=c(minY-5,maxY+5),xaxt="n",
+            xlab="time",
+            ylab="Y")
+lines(c(1,2),mYX1,col="red")
+points(c(1,2),mYX1,pch=19,cex=1.3,col="red")
+points(c(1,2),mYX0,pch=19,cex=1.3)
+axis(side=1, at=seq(1, 2, by=1))
+```
+
+
+
+### 2.2.3 Analyze the data
+Again, we analyze the data with four models.  
+
+▸ First, estimate the ANCOVA with Y2 as the outcome, and X and Y1 as the predictors. Report the parameters (estimate, test, p-value) that are relevant for the causality question.
+```{r}
+ANCOVA <- lm(Y2 ~ X + Y1, data=dat2)
+summary(ANCOVA)
+```
+
+
+▸ Second, estimate the ANCOVA on on the gain score (i.e., Y2-Y1), with X and Y1 as the predictors. Compare the results to the results obtained with an ANCOVA on Y2.
+
+```{r}
+ANCOVA.CS <- lm((Y2-Y1) ~ X + Y1, data=dat2)
+summary(ANCOVA.CS)
+```
+
+
+▸  Third, estimate the change score model by regressing the gain score (Y2-Y1) on X. Report the parameter (estimate, test, p-value) that is relevant for the causality question.
+```{r}
+CSA <- lm((Y2-Y1) ~ X, data=dat2)
+summary(CSA)
+```
+
+▸  Fourth, estimate the marginal model by regressing Y2 on X. Report the parameter (estimate, test, p-value) that is relevant for the causality question.
+```{r}
+Y2onX <- lm(Y2 ~ X, data=dat2)
+summary(Y2onX)
+```
+
+### 2.2.4 Conclusion
+When comparing the results, what is your conclusion about the causal effect of treatment on the outcome, and what model should be preferred?  
+
+Clearly, the two ANCOVAs lead to the same estimate of the causal effect; it is estimated to be about 20, which is the parameter used in the regression equation to simulate the data.  
+
+In contrast, the change score model is leading to the conclusion that treatment has no effect, while the marginal model (Y2 regressed on X) results in a causal effect of about 30.  
+
+Based on the DAGs, we know that X has a direct effect on Y2, which is obtained with the ANCOVA approach. But there is also an indirect effect, as X affects Y1 which in turn affects Y2 (for the sake of completeness, the latter is equal to b2*(mY11-mY01)).  
+
+The marginal model is helping us to estimate that. Hence, if we are interested in the total causal effect of X on Y2, we should consider the last model. But we can add also the estimate of the direct effect, to make the story richer.
+
+## 2.3 Assignment excl. based on pre-test
+In the previous scenario, we started with creating different groups and then simulated the pre-test. Here, we will start with creating a pretest score Y1, and then create two groups X. The groups will be based on a mean-split, and are thus fully determined by the pre-test score.  
+
+An example of such a scenario is when people do a test (e.g., a test of their soccer skills), and all individuals that score above a certain threshold are then given the treatment (i.e., assigned to X=1, which consists of two additional training sessions per week), whereas the people who score below the threshold are not (i.e., they are assigned to X=0); then, at the end of the year, you measure them agian (i.e., their soccer skills), and you want to determine whether the treatment (additional trainings) had a beneficial effect.  
+
+The DAG of this scenario looks like this:
+
+### 2.3.1 Simulate data
+We start with simulating the data. For this, we first need to simulate Y1, which then determines X. Then we can simulate Y2. To make it comparable to the previous example, we use the mean and standard deviation from the Y1 in the previous scenario.Furthermore, when creating Y2, we will make use of the same b0, b1, b2 and residual standard deviation as in the scenario above.
+
+▸ Use the following code to simulate the data.
+
+```{r}
+sd.pre <- sd(Y1)                  # determine total sd of Y1 in simulations above
+mean.pre <- mean(Y1)            # determine total mean of Y1 in sims above
+
+# create a new pre-test score with the same mean and variance
+Y1 <- rnorm(N, mean.pre, sd.pre)
+
+# Use a mean split for Y1 to create two groups:
+X <- rep(0,N)
+X [Y1>mean(Y1)] <- 1        # Treatment groups based on mean split of pretest
+
+# Simulate Y2
+Y2 <- b0 + b1*X + b2*Y1 + rnorm(N,0,sdE2)
+
+dat3 <- data.frame(Y1,Y2,X)
+```
+
+
+### 2.3.2 Plot the data
+▸ First, make the pre-post test plot again and describe what this teaches us.
+
+```{r}
+minY <- min(c(Y1,Y2))
+maxY <- max(c(Y1,Y2))
+plot(x=dat3$Y1, y=dat3$Y2, col = (dat3$X+1),
+    xlim=c(minY,maxY),ylim=c(minY,maxY),
+    xlab="Y1", ylab="Y2")
+```
+▸ Second, make the plot of the means.
+
+```{r}
+# Determine means at each occasion for each group
+mY10 <- mean(Y1[X==0])
+mY11 <- mean(Y1[X==1])
+mY20 <- mean(Y2[X==0]) 
+mY21 <- mean(Y2[X==1]) 
+
+# Gather means on both occasions per treatment condition
+mY0 <- c(mY10,mY20)
+mY1 <- c(mY11,mY21)
+
+minY <- min(mY0,mY1)
+maxY <- max(mY0,mY1)
+
+plot(c(1,2), mY0, type="l", 
+            xlim=c(0.7,2.3),
+            ylim=c(minY-5,maxY+5),xaxt="n",
+            xlab="time",
+            ylab="Y")
+lines(c(1,2),mY1,col="red")
+points(c(1,2),mY1,pch=19,cex=1.3,col="red")
+points(c(1,2),mY0,pch=19,cex=1.3)
+axis(side=1, at=seq(1, 2, by=1))
+```
+
+
+### 2.3.3 Analyze the data
+▸ First, estimate the ANCOVA model with Y2 as the outcome, and X and Y1 as its predictors. What conclusion can you draw about the causal effect based on this analysis?
+```{r}
+ANCOVA <- lm(Y2 ~ X + Y1, data =dat3)
+summary(ANCOVA)
+```
+
+▸ Second, estimate the ANCOVA with the gain score Y2-Y1 as the outcome and Y1 and X as the predictors. What conclusion can you draw about the causal effect based on this analysis?
+```{r}
+ANCOVA.CS <- lm((Y2-Y1) ~ X + Y1, data=dat3)
+summary(ANCOVA.CS)
+```
+
+
+▸  Third, estimate the change score model by regressing Y2-Y1 on X. What conclusion can you draw based on this analysis?
+```{r}
+CSA <- lm((Y2-Y1) ~ X, data=dat3)
+summary(CSA)
+```
+
+
+▸ Fourth, estimate the marginal model with Y2 as the outcome and X as the predictor. What conclusion can you draw based on this analysis?
+```{r}
+Y2onX <- lm(Y2 ~ X, data=dat3)
+summary(Y2onX)
+```
+
+### 2.3.4 Conclusion
+When comparing the results, what is your conclusion about the causal effect of X, and which analysis should be preferred?  
+
+Again, the first two models (ANCOVA and ANCOVA on the change score) lead to the exact same estimate. The other two models lead to different estimates: the third model leads to the conclusion that there is no causal effect, whereas the last model leads to the conclusion that there is a larger positive effect than that obtained with the ANCOVA model. In fact, these results are very similar to the results we obtained with the data in the previous scenario, which illustrates that they are not so informative by themselves.
+
+To decide which analysis is informative if we are interested in obtaining an estimate of the ACE, we should use the DAGs: then, we would conclude that the ANCOVA model is the correct approach here, because Y1 is a confounder (X <- Y1 -> Y2) for which we need to adjust. Note however that it is a very specific scenario, in which there is no overlap between the groups on the covariate (which, btw, would be considered a violation of positivity in the Rubin causal framework!).
+
+
+## 2.4 Assignment partly based on pre-test
+In the previous scenario, we created different groups using a cut-off for the pre-test. As a result, there was no overlap between the groups on the pretest, which was clearly visible in the first plot (Y2 plotted against Y1) that we made.  
+
+Now, we will create data in which the group assignment is only partly based on the pre-test score. Hence, there should be partial overlap between the two groups on the pre-test. The DAGs for this scenario are the same as the ones for the previous scenario.  
+
+### 2.4.1 Simulate data
+We start again with creating the pre-test score as we did in the previous scenario. Then we use this variable to assign people to one of two treatment conditions, but now the assignment is not deterministic: There should be overlap between the groups on the pretest score.  
+
+▸ We do this using a logistic regression model, using the following code:  
+```{r}
+Y1 <- rnorm(N, mean.pre, sd.pre)  # pre-test
+
+# To create a treatment variable based on this pretest
+# but the probability of being treated only partly depends on the pretest
+z <- 0.15*(Y1 - mean(Y1))           # linear combination 
+pr <- 1/(1+exp(-z))               # pass through an inv-logit function
+X <- rbinom(N,1,pr)               # Bernoulli treatment variable
+
+# Now we can create the post-test, like we have done before
+Y2 <- b0 + b1*X + b2*Y1 + rnorm(N,0,sdE2)
+
+dat4 <- data.frame(Y1,Y2,X)
+```
+
+
+### 2.4.2 Plot the data
+▸ First, make the pre-post test plot.
+```{r}
+minY <- min(c(Y1,Y2))
+maxY <- max(c(Y1,Y2))
+plot(x=dat4$Y1, y=dat4$Y2, col = (dat4$X+1),
+    xlim=c(minY,maxY),ylim=c(minY,maxY),
+    xlab="Y1", ylab="Y2")
+```
+
+▸  Second, make a plot of the means.
+```{r}
+# Compute means at first and second occasion
+mY10 <- mean(Y1[X==0])
+mY11 <- mean(Y1[X==1])
+mY20 <- mean(Y2[X==0])
+mY21 <- mean(Y2[X==1])
+
+# Gather means on both occasions per treatment condition
+mY0 <- c(mY10,mY20)
+mY1 <- c(mY11,mY21)
+
+minY <- min(mY0,mY1)
+maxY <- max(mY0,mY1)
+
+plot(c(1,2), mY0, type="l", 
+            xlim=c(0.7,2.3),
+            ylim=c(minY-5,maxY+5),xaxt="n",
+            xlab="time",
+            ylab="Y")
+lines(c(1,2),mY1,col="red")
+points(c(1,2),mY1,pch=19,cex=1.3,col="red")
+points(c(1,2),mY0,pch=19,cex=1.3)
+axis(side=1, at=seq(1, 2, by=1))
+
+```
+
+
+
+### 2.4.3 Analyze the data
+▸ First, estimate the ANCOVA with Y2 as the outcome, and X and Y1 as its predictors. What conclusion can you draw about the causal effect based on this analysis?
+```{r}
+ANCOVA <- lm(Y2 ~ X + Y1, data=dat4)
+summary(ANCOVA)
+```
+
+▸  Second, estimate the ANCOVA with Y2-Y1 as the outcome and Y1 and X as the predictors. What conclusion can you draw about the causal effect based on this analysis?
+```{r}
+ANCOVA.CS <- lm((Y2-Y1) ~ X + Y1, data=dat4)
+summary(ANCOVA.CS)
+```
+
+▸  Third, estimate the change score model by regressing Y2-Y1 on X. What conclusion can you draw based on this analysis?
+```{r}
+CSA <- lm((Y2-Y1) ~ X, data=dat4)
+summary(CSA)
+```
+
+
+▸ Fourth, estimate the marginal model with Y2 as the outcome and X as the predictor. What conclusion can you draw based on this marginal?
+```{r}
+Y2onX <- lm(Y2 ~ X, data=dat4)
+summary(Y2onX)
+```
+
+### 2.4.4 Conclusion
+When comparing the results, what is your conclusion? How can a DAG help to decide which model to use?  
+Again, the two ANCOVAs (with Y2 or Y2-Y1 as the outcome) lead to the same estimate of the causal effect. The change score model (with only X as a predictor of Y2-Y1) gives a much smaller, yet significant positive effect. Finally, the marginal model (With Y2 regressed on X) results in a very large significant positive effect.
+
+Based on the DAG, we know that Y1 is a common cause of X and Y2, and therefore we should control for it (i.e., condition on it by including it as a predictor). Hence, the two ANCOVA approaches should be preferred over the other two approaches.
+
+## 2.5 Overall conclusion
+What we have seen in this exercise is that the critical distinction between the four scenarios is the ***relation between X and Y1***. *In the RCT they are independent of each other, and in that case, all four analyses lead to the same conclusion.*
+
+In the second scenario, we *first created X and based on X we created Y1*; hence *Y1 is a mediator* on the indirect path from X to Y2. Controlling for it (as is done in the ANCOVAs) blocks this path, which results in estimating the direct effect rather than the total effect of X on Y2. The change score analysis (i.e., regressing Y2-Y1 on X) results in estimating the total effect of treatment on change, while the *marginal model (i.e., regressing Y2 on X) gives the total effect of treatment on Y2*.  
+
+The third and fourth scenario are based on *creating Y1 first, and then creating X based on this*. In these scenarios, *Y1 is a confounder or common cause of X and Y2*. This means we *should definitely control for it* if we want to estimate the causal effect of X on Y2. Hence, the *ANCOVA* would be the analysis of choice here.  
+
+Note that in the current scenarios, the parameters were chosen such that the ANCOVA model resulted in a positive effect of about 20, whereas the change score model tended to result in a non-significant or vary small effect, and the marginal model resulted in a very large positive effect. However, it is also possible to get very different patterns across these models (e.g., see the examples in the lecture for this).
+
+
+# 3. Changes Scores & Unobserved Time-Invariant Confounding
+The change score model has been advocated as a useful approach when there is unobserved time-invariant confounding. Kim and Steiner (2019) discussed this (see this week’s reading materials). To get a sense of how this works, you will simulate data with such a time-invariant confounder, and then analyze the data without this confounder (as if it is unobserved!).  
+
+Examples of such an unmeasured time-invariant confounder are for instance ability, when we measure something like math achievement or language skills. But an unmeasured time-invariant confounder can also consist of personality, or genetic or physical factors that influence our repeated measures of for instance attitude, motivation, interests, mood, symptoms (e.g., of depression or cancer), behavior, social interactions, and so on.  
+
+## 3.1 Simulate data
+We will consider the following model to simulate data:
+
+▸ To begin, simulate the time-invariant confounder U using a standard normal distribution (i.e., mean of zero and standard deviation of 1) for a sample of 5000 people. (Note that we use a (relatively) large sample size here, to decrease the sampling variance).
+
+```{r}
+set.seed(934) # set the seed for comparison
+N <- 5000 # sample size
+U <- rnorm(N)  # Unmeasured time-invariant confounder
+```
+
+
+▸ Next, create the treatment variable that is dependent on this U.
+
+```{r}
+# Create a treatment variable that is dependent on the unmeasured confounder
+z <- -1.1*(U)           # linear combination with noise
+pr <- 1/(1+exp(-z))               # pass through an inv-logit function
+X <- rbinom(N,1,pr)               # Bernoulli treatment variable
+cor(X,U)                        # check the correlation
+```
+
+
+▸  Now create Y1 and Y2; both are dependent on U. Furthermore, Y2 also depends on treatment X.
+```{r}
+# Create the pre-test and the post-test
+Y1 <- 10 + 0.7*U + rnorm(N)
+Y2 <- 11 + 0.7*U + 0.5*X + rnorm(N)
+
+dat5 <- data.frame(U,X,Y1,Y2)
+round(cor(dat5),2)
+```
+
+
+▸  What is the size of the direct effect of X on Y2? And what is the size of the backdoor path?  
+direct effect = 0.5  
+size of the backdoor path = 0.7 ??
+
+▸ Based on your answer to the previous answer, what do you expect to happen when you fail to account for the backdoor path, and just regress Y2 on X?  
+Get an biased estimate...
+
+## 3.2 Analyze the data
+We will analyze these data in a variety of ways. Note however that in none of the analyses will we be able to include U, as this variable represents the unobserved confounder. That is, we should think of our observed data to consist only of the variables: treatment X, pre-test Y1, and post-test Y2.  
+
+
+### 3.2.1 Marginal model
+We start with the marginal model, by which we estimate the prima facie effect (see Week 2); this implies we just regress Y2 on X, and assume there is no confounding.  
+
+▸ What is the marginal effect of X on Y2? How does this compare to the true effect with which you simulated the data?
+```{r}
+Y2onX <- lm(Y2 ~ X, data=dat5)
+summary(Y2onX)
+```
+
+
+
+### 3.2.2 ANCOVA model
+Run an ANCOVA model with X as the predictor of interest, and Y1 as covariate. As Y1 is a proxy of the unmeasured confounder U, including it as a covariate may help to block the backdoor path X <-- U --> Y2 to some extent.  
+
+▸ What is the effect of X on Y2 in this approach, how would you describe it to others, and how does this compare to the true value?
+
+```{r}
+ANCOVA <- lm(Y2 ~ X + Y1, data=dat5)
+summary(ANCOVA)
+```
+
+▸ Given the result above, what would you expect the scatter plot of the data (with Y2 plotted against Y1 with different colors for the two groups) to look like? Make this plot.  
+```{r}
+plot(x=dat5$Y1, y=dat5$Y2, col = (dat5$X+1),
+        xlab="Y1", ylab="Y2")
+# Note that in the plot the treatment group (X=1) is in red, and the
+# control group (no treatment; X=0) is in black.
+```
+
+### 3.2.3 Change score model
+According to Kim and Steiner (2016), and many others, this model should result in an unbiased estimate of the effect of X on Y2. The DAG for this approach is shown below.
+
+▸ Use the DAG to explain why the causal effect of X on the gain score G is the same as the effect of the X on Y2.  
+
+▸ Run the change score model, with the gain score G=Y2-Y1 as the outcome variable and X as the predictor. What effect do you find, and how does this compare to the true causal effect of X on Y2?
+```{r}
+CSA <- lm((Y2-Y1) ~ X, data=dat5)
+summary(CSA)
+```
+
+
+▸  Based on the results, do you know what to expect if you would make a plot of the means of the groups at pre-test and at post-test? Make the plot, and compare this to your expectations.
+```{r}
+# Compute means at first and second occasion
+mY10 <- mean(Y1[X==0])
+mY11 <- mean(Y1[X==1])
+mY20 <- mean(Y2[X==0])
+mY21 <- mean(Y2[X==1])
+
+# Gather means on both occasions per treatment condition
+mY0 <- c(mY10,mY20)
+mY1 <- c(mY11,mY21)
+minY <- min(Y1,Y2)
+maxY <- max(Y1,Y2)
+
+# Gather means on both occasions per treatment condition
+plot(c(1,2), mY0, type="l", 
+            xlim=c(0.7,2.3),
+            ylim=c(minY,maxY),xaxt="n",
+            xlab="time",
+            ylab="Y")
+lines(c(1,2),mY1,col="red")
+points(c(1,2),mY1,pch=19,cex=1.3,col="red")
+points(c(1,2),mY0,pch=19,cex=1.3)
+axis(side=1, at=seq(1, 2, by=1))
+
+# Note again in this plot, the treatment group (X=1) is in red, 
+# and the control group (no treatment; X=0) is in black.
+
+```
+
+▸ Suppose that Y1 and Y2 are measures of math achievement, U is the unobserved math ability, and X is participation in a math camp. How would you explain the results we found above in substantive terms then?
+
+## 3.3 Conclusion
+In this exercise you have gained more experience with the gain score model, and the specific scenario in which it should be preferred over doing an ANCOVA: ***When there is an unmeasured time-invariant confounder that is a common cause of X, Y1, and Y2, and that has a stable effect on Y1 and Y2***. Other assumptions are that there are ***no other relations between the pre-test Y1 and X, or between Y1 and Y2***.  
+
+We have seen that in this scenario, the *marginal model (regressing Y2 on X) leads to a biased estimated of the causal effect of X on Y2, as it does not account for the backdoor path X <- U -> Y2*.  
+
+We have also seen that including *Y1 as a proxy of the unmeasured confounder (regressing Y2 on X and Y1; i.e., ANCOVA), only partly removes this effect*.  
+
+Here, using a ***change score model (regression of gain score Y2-Y1 on X) leads to an unbiased estimate, as the two backdoor paths from X to the gain score G cancel each other out***. Kim and Steiner refer to this technique as off-setting these paths, rather than blocking them (which would require conditioning on a variable along the path).  
+
+While this illustrates the elegance of this approach very nicely, we have to realize that the *assumptions (mentioned above) are quite strong*. Using simulations like these, we could further investigate what happens *when the effect of U is not stable over time*, or *when Y1 affects X and/or Y2*, or *Y1 is affected by X*. Such an analysis could help to establish how robust a conclusion (about the strength and sign of the effect of X) is against violations of each of these assumptions.
+
+
+
+
+

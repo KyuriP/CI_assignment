@@ -1,0 +1,362 @@
+---
+title: "CI_Ex2_KP"
+author: "Kyuri Park 5439043"
+date: "3/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# install.packages("tableone")
+# install.packages("MatchIt")
+# install.packages("survey")
+library(dplyr)
+library(tableone)
+library(MatchIt)
+library(survey)
+```
+## 1. Data and R-pacakges
+```{r}
+# load data
+df <- read.table("SchaferKangData.dat", header=T)
+df[1:10,]
+```
+
+
+## 2. Prima Facie Effect : Not controlling for any variable
+### 2.1 Method1: Compare Means
+▸ Compare the means between the groups on the outcome variable (see Equation (5) in S&K; use for instance t.test() in R).  
+
+The mean difference is the "prima facie" estimate of the average causal effect of dieting on distress. The results indicate that the average of the girls who did diet is (0.703-0.645=)0.059 higher than the average of the girls who did not diet ($SE=0.015$). This difference is statistically significant. 
+
+```{r}
+t.test1 <- t.test(DISTR.2 ~ DIET, df)
+# Difference in means between the groups:
+m1 <- t.test1$estimate[[2]]
+m0 <- t.test1$estimate[[1]]
+
+# mean difference
+m1 - m0 
+
+# std. error
+t.test1$stderr
+
+# p-value
+t.test1$p.value
+```
+
+### 2.2 Invetigating covariates - potential confounding
+
+▸ Determine the standardized mean difference between the girls who did diet versus the girls who did not diet on the first covariate, that is: DISTR.1 (emotional distress at wave 1).
+```{r}
+df1 <- df[ which(df$DIET == 1), ]
+df0 <- df[ which(df$DIET == 0), ]
+
+(mean(df1$DISTR.1) - mean(df0$DISTR.1))/(sqrt( (var(df1$DISTR.1)+var(df0$DISTR.1))/2 )) 
+```
+
+▸ Instead of computing these standardized mean differences yourself, you can also use the function CreateTableOne() from the package tableone. Run the code below.  
+```{r}
+library(tableone)
+table1 <- CreateTableOne(vars=c("DISTR.1","BLACK", "NBHISP", "GRADE",
+                      "SLFHLTH", "SLFWGHT", "WORKHARD", "GOODQUAL", 
+                          "PHYSFIT", "PROUD", "LIKESLF", "ACCEPTED", 
+                      "FEELLOVD"), strata="DIET", data=df, 
+                        test=FALSE)
+```
+
+
+▸ Obtain the table with standardize mean differences using print(table1, smd=TRUE), and comment on the results.  
+
+Most of the standardized mean difference are larger than the rule o thumb (0.1). This implies that for multiple covariates, the difference between their means of the two treatment groups are larger than 0.1 standard deviations. This indicates considerable imbalance across the two groups with respect to these covariates. This means the data do not mimic RCT very well.  
+Hence, we need to take some actions to takle this.  
+
+```{r}
+print(table1, smd=TRUE)
+```
+
+
+## 3. Controlling for Confounders Z: Model the relation of Z with Y
+### 3.1 Metohd 1: ANCOVA (Linear Regression without Interactions)
+
+The result below show that after correcting for the effect of the covariates, the effect of the treatment (DIET) on the outcome (DISTR.2) is not significant. The estimate of the ACE is -0.014 (SE = 0.013). 
+
+```{r}
+M2 <- glm(DISTR.2 ~ ., data=df)
+summary(M2)
+#summary(lm(DISTR.2 ~ ., data=df)) # same as lm() right? here, yes.
+```
+
+### 3.2 Method 2: Regression (Linear Regression with extras such as interactions)
+▸ Run the regression model with two-way interactions between the treatment variable and the covariates, for instance using the function glm() in R, and interpret the results.  
+
+We need to center the covariates first, to make sure the main effect interpretation of treatment can be: the casual effect when the other variables take on their mean value (0) --> average causal effect
+
+```{r}
+##### center the covariates #####
+covariates <- colnames(df[1:13])
+centered_df <- df %>% 
+  mutate_at(covariates, scale, scale = FALSE)  # center but no scale.
+
+# Model with two-way interactions
+M2b <- glm(DISTR.2 ~ . + DIET:. , data= centered_df)
+summary(M2b)
+```
+
+### 3.3 Method 3: Regression estimation 
+▸  Start with creating separate data sets for the two treatment groups, and running a regression analysis for each group separately:
+```{r}
+groups <- df %>%  group_split(DIET)
+names(groups) <- c("DIET0", "DIET1")
+
+# Regression analysis with only people with X=0:
+M3.0 <- glm(DISTR.2 ~., data=groups[[1]])
+summary(M3.0)
+# Regression analysis with only people with X=1:
+M3.1 <- glm(DISTR.2 ~., data=groups[[2]])
+summary(M3.1)
+```
+
+▸  Now, obtain estimates for everyone (both for those who we observed X=1 and X=0) for the potential outcome under treatment and under no treatment: 
+```{r}
+# Obtain a prediction for the outcome using all the cases, based on 
+# the parameter estimates obtained above and saved in M3.1:
+M3.est.Y1 <- predict(M3.1, newdata = df)
+
+# Do the same, but now with the parameters saved in M3.0:
+M3.est.Y0 <- predict(M3.0, newdata = df)
+```
+
+▸ Estimate the average causal effect based on what you have created in the previous (focus on obtaining the point estimate, you do not need to obtain a correct standard error/certainty interval/p-value).
+
+```{r}
+# Look at the predicted potential outcomes
+cbind(M3.est.Y0, M3.est.Y1)[1:10,]
+
+# Estimate the causal effect now, using a t-test
+t.test(M3.est.Y0, M3.est.Y1, paired = TRUE, alternative = "two.sided") #paried = TRUE! 
+```
+
+▸  (OPTIONAL) Above we have used the predicted potential outcomes for everyone. However, one of them is actually observed, and we could use those instead of the predicted potential outcome (i.e., we use the observed fact, and predict only the counterfact). Check whether this leads to a different result.  
+Yes, the p-value is not significant any longer.
+
+```{r}
+# Take the predicted potential outcome for X=0
+# and only for those for whom we observed X=0
+# do we overwrite the predicted potential outcome
+M3b.Y0 <- M3.est.Y0
+M3b.Y0[df$DIET==0] <- df$DISTR.2[df$DIET==0]
+
+# Do the same for the predicted potential outcome for X=1
+M3b.Y1 <- M3.est.Y1
+M3b.Y1[df$DIET==1] <- df$DISTR.2[df$DIET==1]
+
+# Now do the t-test with these (observed and predicted) potential outcomes:
+t.test(M3b.Y0, M3b.Y1, paired = TRUE, alternative = "two.sided")
+
+```
+
+### 3.4 Conclusion
+
+▸ To get a first impression of whether this extrapolation issue applies here, use standardized mean differences again. In this case, use cut off of 0.3 to indicate a potential problem.
+```{r}
+library(resample) # for colVars
+
+df1 <- df[ which(df$DIET == 1), ][1:13]
+df0 <- df[ which(df$DIET == 0), ][1:13]
+mean1 <- colMeans(df1)
+mean0 <- colMeans(df0)
+var1 <- colVars(df1)
+var0 <- colVars(df0)
+smd <- abs( (mean1- mean0) / sqrt((var1 + var0)/2) )
+smd[smd > 0.3]
+
+
+# OR using table1
+table1 <- CreateTableOne(vars=c("DISTR.1","BLACK", "NBHISP", "GRADE",
+                      "SLFHLTH", "SLFWGHT", "WORKHARD", "GOODQUAL", 
+                          "PHYSFIT", "PROUD", "LIKESLF", "ACCEPTED", 
+                      "FEELLOVD"), strata="DIET", data=df, 
+                        test=FALSE)
+print(table1, smd =TRUE)
+```
+
+## 4. Controlling for Confounders Z: Model the relation of Z with X
+### 4.1 Estimate the propensity scores
+▸ To compute a propensity score, run a logistic regression model in which the treatment variable X (which has values 0 and 1) is the outcome variable, and the covariates are the predictors. Make sure to save the probability for each person for scoring 1 on X (here: DIET). You can use the glm function from the stats package for this.
+```{r}
+library(stats)
+
+# Run the logistic regression analysis
+logreg <- glm(DIET ~., family = binomial(), data = df[-15])
+summary(logreg)
+
+# Obtain a prediction of the probability of treatment (i.e., DIET=1) 
+ps <- predict(logreg, type = "response")
+
+# Add this predicted probability to the data file
+df$ps <- ps
+
+# Look at the datafile 
+round(df[1:10,], 2)
+
+```
+
+▸ Make a plot that includes a histogram for the propensities of the treated, and a histogram for the propensity scores of the untreated to evaluate this. Discuss what you see in the plot, and what this may imply for our causal inferences.  
+```{r}
+library(ggplot2)
+
+df %>% 
+  ggplot(aes(x=ps, fill=factor(DIET))) +
+  geom_histogram(color="black", position="identity", bins=50) +
+  scale_fill_manual(values=c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)), name="DIET") +
+  labs(title="Histogram of propensity scores", x = "Propensity score") + xlim(0,1) +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
+
+### 4.2 Method 4: Matching
+
+```{r}
+library(MatchIt)
+matchdat <- matchit(DIET ~ DISTR.1 + as.factor(BLACK) + as.factor(NBHISP) 
+            + GRADE + SLFHLTH + SLFWGHT + WORKHARD + GOODQUAL 
+            + PHYSFIT + PROUD + LIKESLF + ACCEPTED + FEELLOVD, 
+        method = "nearest",  data = df)
+```
+
+▸ Describe/Interpret the information that is reported in the output (matchdat).  
+```{r}
+matchdat
+summary(matchdat)
+```
+
+
+▸ There are two useful plotting options regarding the propensity scores of our matched pairs: plot(matchdat,type="jitter") and plot(matchdat,type="hist"). Get both plots, and describe what they represent.
+```{r}
+plot(matchdat,type="jitter")
+plot(matchdat,type="hist")
+```
+
+▸ To do the analysis on the matched cases only, we need to create a new data file with only the matched cases, using: df.match <- match.data(matchdat). Create the Table 1 for this matched data set. What can you conclude?  
+```{r}
+# To extract the new datafile from the original one:
+df.match <- match.data(matchdat)
+
+# Create Table 1:
+table1 <- CreateTableOne(vars=c("DISTR.1","BLACK", "NBHISP", "GRADE",
+                      "SLFHLTH", "SLFWGHT", "WORKHARD", "GOODQUAL", 
+                          "PHYSFIT", "PROUD", "LIKESLF", "ACCEPTED", 
+                      "FEELLOVD"), strata="DIET", data=df.match, 
+                        test=FALSE)
+print(table1, smd=TRUE)
+```
+
+▸ Subsequently, investigate with a t-test whether the means on the outcome variable DISTR.2 differ among the matched cases.
+```{r}
+# Do a t-test on the matched data file:
+t.test2 <- t.test(DISTR.2 ~ DIET, df.match)
+t.test2
+
+# Note the means per group are included at the bottom.
+# We can also compute the mean difference, using:
+t.test2$estimate[[2]] - t.test2$estimate[[1]]
+```
+
+
+▸ Compare this result to the mean comparison you did at the start; explain why the mean differences that you have just determined is an estimate of the ACE1 rather than of the ACE.  
+
+
+### 4.3 Metod 5: IPW
+▸ Compute the ACE using this IPW (see Equation (20) in S&K).
+```{r}
+Y <- df$DISTR.2
+X <- df$DIET
+mu1hat <- sum( X*Y/ps ) / sum(X/ps)
+mu0hat <- sum( (1-X)*Y/(1-ps) ) / sum((1-X)/(1-ps))
+mu1hat - mu0hat
+```
+
+```{r}
+# For those who are interested, a more sophisticated
+# way of getting the ACE using IPW is given below; it is based on
+# using the package survey in R. """This makes more sense?! """ :) 
+library(survey)
+library(tableone)
+
+weight <- ifelse(df$DIET==1, 1/(df$ps), 1 / (1-df$ps))
+weighteddata <- svydesign(ids = ~ 1, data =df, weights = ~ weight)
+weightedtable <- svyCreateTableOne(vars=c("DISTR.1","BLACK", "NBHISP", "GRADE",
+                      "SLFHLTH", "SLFWGHT", "WORKHARD", "GOODQUAL", 
+                          "PHYSFIT", "PROUD", "LIKESLF", "ACCEPTED", 
+                      "FEELLOVD"), strata = "DIET", 
+                      data = weighteddata, test = FALSE)
+
+#print(weightedtable, smd=TRUE) ### print doesn't work "non-numeric argument ~" WHY???
+
+
+# fit a linear model
+msm <- svyglm(DISTR.2 ~ DIET, design = weighteddata)
+summary(msm)
+confint(msm)
+```
+
+### 4.4 Method 6: Subclassification
+▸ Begin with creating five strata based on the propensity scores (for instance, use the function cut() in R); each stratum should contain 20% of the (total number of) observations.  
+```{r}
+df$stratum <- cut(df$ps, 
+                    breaks=c(quantile(df$ps, probs=seq(0,1,0.2))),
+                    labels=seq(1:5),
+                    include.lowest=TRUE)
+
+# We can also make a plot of these quantiles; this is based on
+# using the same histogram we had before, now adding vertical 
+# lines for where the breaks of the strata are.
+br <- c(quantile(df$ps, probs=seq(0,1,0.2)))
+
+df %>% 
+  ggplot(aes(x=ps, fill=factor(DIET))) +
+  geom_histogram(color="black", position="identity", bins=50) +
+  scale_fill_manual(values=c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)), name="DIET") +
+  labs(title="Histogram of propensity scores with quantile breaks", x = "Propensity score") + xlim(0,1) + theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(aes(xintercept = br[2]), size=1)+
+  geom_vline(aes(xintercept = br[3]), size=1)+
+  geom_vline(aes(xintercept = br[4]), size=1)+
+  geom_vline(aes(xintercept = br[5]), size=1)+
+  theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+▸ Next, compute the ACE in each stratum, taking the mean difference.  
+
+```{r}
+# We perform a t-test in each stratum.
+
+results <- matrix(NA, 5,1)
+for (quantiles in 1:5) {
+  t.test3 <- t.test(DISTR.2 ~ DIET, data = df[which(df$stratum==quantiles),])
+  print(t.test3)
+  # Difference in means:
+  results[quantiles,1] <- t.test3$estimate[[2]] - t.test3$estimate[[1]]
+}
+
+```
+
+
+▸ Subsequently, you can compute the overall ACE by taking the average of the stratum-specific ACE’s (weighted by the stratum size).  
+
+```{r}
+# Note that since our five strata are based on quantiles, the sample
+# size of each stratum will be the same (i.e. 1/5th of the total sample size)
+# such that each stratum-specific ACE adds equally to the total. 
+# Note that this also means that our ACE estimate will differ somewhat
+# from the ACE estimate reported in Table 6 by Schafer and Kang, as they
+# had further divided the fifth stratum.
+# To get the ACE, we simply take the mean of the stratum-specific ACEs:
+mean(results[,1])
+```
+
+

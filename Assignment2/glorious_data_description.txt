@@ -1,0 +1,31 @@
+Hello. 
+
+The dataset is called glorious_data.RDS.
+
+The variables are:
+
+* *CBD* (Cannabidiol Consumption in ml/day, range from 0 - 120, mean = 55) 
+
+* *EtD* (Eating Disorder Scale, scale from -30 - 30, mean = 0) 
+
+* *ChP* (Chronic Pain, scale from 0 - 100, mean = 50)
+
+* *LfS* (Life Satisfaction, scale from 0-100, mean = 50)
+
+* *Anx* (Anxiety, scale from 0 - 120, mean = 60)
+
+Your task is to estimate the effect of CBD on LfS. 
+
+Good luck, here is some ice cream!
+
+        .-"`'"-.
+       /        \
+       |        |
+       /'---'--`\
+      |          |
+      \.--.---.-./
+      (_.--._.-._)
+        \=-=-=-/
+         \=-=-/
+          \=-/
+           \/
